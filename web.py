@@ -9,7 +9,6 @@ ownership tree as an interactive graph.
 import os
 import sys
 import time
-from pathlib import Path
 
 from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, jsonify
 from neo4j import GraphDatabase
@@ -26,8 +25,8 @@ if os.path.exists(_env_path):
 
 # Import director fetching from fetch_directors.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fetch_directors import fetch_officers, load_officers_to_neo4j, make_director_id, get_tree_company_numbers, get_fetch_metadata, needs_refresh, STAMP_FETCH_QUERY, CREATE_INDEXES_QUERY
-from search import extract_graph_data, export_html, _compute_levels
+from fetch_directors import fetch_officers, load_officers_to_neo4j, get_tree_company_numbers, get_fetch_metadata, needs_refresh, STAMP_FETCH_QUERY
+from search import extract_graph_data, _compute_levels
 
 app = Flask(__name__)
 
@@ -559,8 +558,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           }
           return;
         }
-        {
-          var cn = (n.properties || {}).companyNumber || '';
+        var cn = (n.properties || {}).companyNumber || '';
 
           // Check if this Company already exists in the graph (different neo4j ID, same companyNumber)
           if (n.group === 'Company' && cn && cnToNodeId[cn]) {
@@ -644,8 +642,6 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           }
           nodes.add(n);
           added++;
-        }
-        }
       });
       var existing = edges.get();
       (d.edges || []).forEach(function(e) {
