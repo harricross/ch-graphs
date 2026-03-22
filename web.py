@@ -37,6 +37,9 @@ NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "companies2026")
 CH_API_KEY = os.environ.get("CH_API_KEY", os.environ.get("CH_API", ""))
 RATE_LIMIT_DELAY = 0.2
 
+# Metrics
+stats = {"ch_api_calls": 0, "ch_api_cached": 0, "neo4j_queries": 0, "graphs_served": 0}
+
 driver = None
 
 
@@ -97,6 +100,10 @@ HOME_TEMPLATE = """<!DOCTYPE html>
   </form>
 
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <div style="margin-top: 32px; color: #555; font-size: 12px;">
+    Graphs served: {{ stats.graphs_served }} · CH API calls: {{ stats.ch_api_calls }} · Served from cache: {{ stats.ch_api_cached }}
+  </div>
 
   {% if recent %}
   <div class="recent">
@@ -184,7 +191,7 @@ def home():
             reverse=True,
         )
         recent = files[:10]
-    return render_template_string(HOME_TEMPLATE, recent=recent, error=request.args.get("error"))
+    return render_template_string(HOME_TEMPLATE, recent=recent, error=request.args.get("error"), stats=stats)
 
 
 @app.route("/search")
@@ -917,6 +924,7 @@ def api_stream():
                         yield send("data", _json.dumps(chunk, default=str))
                 yield send("status", f"{len(vn)} nodes, {len(ve)} edges (merged)")
 
+        stats["graphs_served"] += 1
         yield send("done", "Complete")
 
     return Response(generate(), mimetype='text/event-stream',
@@ -1155,11 +1163,14 @@ def _ensure_directors(d, company_number):
         meta = get_fetch_metadata(d, tree)
         to_fetch = [(cn, meta.get(cn, {}).get("etag")) for cn in tree if needs_refresh(meta.get(cn, {}).get("fetchedAt"))]
 
+        stats["ch_api_cached"] += len(tree) - len(to_fetch)
         for cn, old_etag in to_fetch:
+            stats["ch_api_calls"] += 1
             officers, new_etag, modified = fetch_officers(CH_API_KEY, cn, etag=old_etag)
             if modified and officers:
                 load_officers_to_neo4j(d, cn, officers, etag=new_etag)
             elif not modified:
+                stats["ch_api_cached"] += 1  # 304 Not Modified counts as cached
                 with d.session() as session:
                     session.run(STAMP_FETCH_QUERY, cn=cn, etag=old_etag)
             time.sleep(RATE_LIMIT_DELAY)
@@ -1207,6 +1218,11 @@ def _directors_query(company, include_former=False):
         f"{where_clause}"
         f"RETURN dirPath AS path"
     )
+
+
+@app.route("/api/stats")
+def api_stats():
+    return jsonify(stats)
 
 
 @app.route("/api/expand")
@@ -1288,15 +1304,19 @@ def api_expand():
             meta = _meta(d, [company])
             m = meta.get(company, {"fetchedAt": None, "etag": None})
             if _needs(m["fetchedAt"]):
+                stats["ch_api_calls"] += 1
                 print(f"  [directors] Fetching officers for {company}...", flush=True)
                 officers, new_etag, modified = _fetch(CH_API_KEY, company, etag=m.get("etag"))
                 if modified and officers:
                     _load(d, company, officers, etag=new_etag)
                     print(f"  [directors] Loaded {len(officers)} officers for {company}", flush=True)
                 elif not modified:
+                    stats["ch_api_cached"] += 1
                     from fetch_directors import STAMP_FETCH_QUERY as _stamp
                     with d.session() as session:
                         session.run(_stamp, cn=company, etag=m.get("etag") or "")
+            else:
+                stats["ch_api_cached"] += 1
         with d.session() as session:
             records = list(session.run(
                 "MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(c:Company {companyNumber: $cn}) "
