@@ -270,7 +270,8 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <span class="legend-item"><span class="legend-line" style="background:#f1c40f"></span>25-50%</span>
       <span class="legend-item"><span class="legend-line" style="background:#9b59b6"></span>Appoint dirs</span>
       <span class="legend-item"><span class="legend-line" style="background:#3498db"></span>Influence</span>
-      <span class="legend-item"><span class="legend-line" style="background:#00BCD4"></span>Officer</span>
+      <span class="legend-item"><span class="legend-line" style="background:#00BCD4"></span>Director</span>
+      <span class="legend-item"><span class="legend-line" style="background:#78909C"></span>Secretary</span>
     </div>
     <div class="btn-row">
       <button class="btn" onclick="toggleLayout()">Toggle Layout</button>
@@ -305,7 +306,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true }
     };
     var forceOpts = { layout: { hierarchical: { enabled: false } },
-      physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -100, springLength: 180 },
+      physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -200, springLength: 250, springConstant: 0.02, damping: 0.4 },
         stabilization: { iterations: 300 } },
       nodes: hierOpts.nodes, edges: Object.assign({}, hierOpts.edges, { smooth: { type: 'continuous' } }),
       interaction: hierOpts.interaction };
@@ -788,6 +789,15 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         .then(function(r) { return r.json(); })
         .then(function(d) {
           if (d.nodes && d.nodes.length > 0) mergeData(d);
+          // Re-check cap after merge
+          var maxN = parseInt(document.getElementById('autoMax').value) || 200;
+          if (nodes.length >= maxN) {
+            autoRunning = false;
+            document.getElementById('autoBtn').textContent = 'Auto-resolve all';
+            document.getElementById('autoStatus').textContent = 'Stopped — ' + nodes.length + ' nodes (limit ' + maxN + ')';
+            network.fit({ animation: true });
+            return;
+          }
           setTimeout(autoStep, 200);
         })
         .catch(function(e) {
@@ -981,8 +991,12 @@ def _build_vis_data(nodes, rels):
             node_data["level"] = levels[n["id"]]
         vis_nodes.append(node_data)
 
-    def edge_color(rel_type, noc_list):
-        if rel_type == "OFFICER_OF": return "#00BCD4", 2.0
+    def edge_color(rel_type, props):
+        if rel_type == "OFFICER_OF":
+            role = (props.get("role", "") or "").lower()
+            if "secretary" in role: return "#78909C", 1.5  # grey-blue for secretaries
+            return "#00BCD4", 2.0  # cyan for directors
+        noc_list = props.get("naturesOfControl", [])
         if not noc_list: return "#666", 1.5
         noc_str = " ".join(noc_list) if isinstance(noc_list, list) else str(noc_list)
         if "75-to-100" in noc_str: return "#e74c3c", 3.5
@@ -997,8 +1011,9 @@ def _build_vis_data(nodes, rels):
         ek = (r["startId"], r["endId"], r["type"])
         if ek in seen_edges: continue
         seen_edges.add(ek)
-        noc_raw = r["properties"].get("naturesOfControl", [])
-        col, width = edge_color(r["type"], noc_raw)
+        props = r["properties"]
+        col, width = edge_color(r["type"], props)
+        noc_raw = props.get("naturesOfControl", [])
         if isinstance(noc_raw, list):
             noc = ", ".join(
                 x.replace("ownership-of-shares-", "shares:").replace("voting-rights-", "votes:")
@@ -1008,7 +1023,12 @@ def _build_vis_data(nodes, rels):
                 for x in noc_raw)
         else:
             noc = str(noc_raw)
-        elabel = r["type"].replace("HAS_SIGNIFICANT_CONTROL", "CONTROLS").replace("OFFICER_OF", "DIRECTOR").replace("_", " ")
+        # Use role as label for OFFICER_OF
+        if r["type"] == "OFFICER_OF":
+            role = props.get("role", "officer") or "officer"
+            elabel = role.replace("_", " ").title()
+        else:
+            elabel = r["type"].replace("HAS_SIGNIFICANT_CONTROL", "CONTROLS").replace("_", " ")
         vis_edges.append({"from": r["startId"], "to": r["endId"], "label": elabel,
                           "title": noc or r["type"], "arrows": "to",
                           "color": {"color": col, "highlight": "#fff", "hover": col}, "width": width})
