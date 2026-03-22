@@ -1,0 +1,38 @@
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: chsearch-neo4j
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt protocol
+    environment:
+      - NEO4J_AUTH=neo4j/companies2026
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_server_memory_heap_initial__size=4g
+      - NEO4J_server_memory_heap_max__size=6g
+      - NEO4J_server_memory_pagecache_size=4g
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - ./data:/import
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    image: nginx:alpine
+    container_name: chsearch-web
+    ports:
+      - "8080:80"
+    volumes:
+      - ./exports:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:

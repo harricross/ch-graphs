@@ -1,0 +1,21 @@
+# Data files (too large for git)
+*.csv
+*.txt
+!requirements.txt
+data/import/*.csv
+
+# Exports (generated files)
+exports/*.html
+exports/*.json
+exports/*.csv
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Environment
+.env
+
+# OS
+.DS_Store
