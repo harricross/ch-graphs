@@ -1075,14 +1075,6 @@ def api_stream():
             dir_query = _directors_query(company, include_former=include_former)
             with d.session() as session:
                 dir_records = list(session.run(dir_query))
-            if not dir_records:
-                resigned_filter = "" if include_former else "WHERE r.resignedOn IS NULL OR r.resignedOn = '' "
-                with d.session() as session:
-                    dir_records = list(session.run(
-                        f"MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(c:Company {{companyNumber: $cn}}) "
-                        f"{resigned_filter}"
-                        f"RETURN dirPath AS path", cn=company
-                    ))
 
             if dir_records:
                 # Combine ALL records (ownership + directors) for proper merge
