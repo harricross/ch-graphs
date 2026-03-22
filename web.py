@@ -1510,7 +1510,7 @@ def _ownership_query(company, direction="both"):
         return (
             f"MATCH (c:Company {{companyNumber: '{company}'}}) "
             f"CALL apoc.path.expandConfig(c, {{"
-            f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
+            f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY>', "
             f"  minLevel: 1, maxLevel: 30, "
             f"  uniqueness: 'NODE_GLOBAL'"
             f"}}) YIELD path RETURN path"
@@ -1520,7 +1520,7 @@ def _ownership_query(company, direction="both"):
         return (
             f"MATCH (c:Company {{companyNumber: '{company}'}}) "
             f"CALL apoc.path.expandConfig(c, {{"
-            f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
+            f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY>', "
             f"  minLevel: 1, maxLevel: 30, "
             f"  uniqueness: 'NODE_GLOBAL'"
             f"}}) YIELD path RETURN path"
@@ -1533,7 +1533,7 @@ def _directors_query(company, include_former=False):
     return (
         f"MATCH (c:Company {{companyNumber: '{company}'}}) "
         f"CALL apoc.path.expandConfig(c, {{"
-        f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
+        f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY>', "
         f"  minLevel: 0, maxLevel: 30, "
         f"  uniqueness: 'NODE_GLOBAL'"
         f"}}) YIELD path "
