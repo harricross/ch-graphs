@@ -1510,7 +1510,7 @@ def _ensure_directors(d, company_number):
 
 
 def _ownership_query(company, direction="both"):
-    """Build the ownership tree Cypher query. Filters out ceased PSC relationships."""
+    """Build the ownership tree Cypher query."""
     return (
         f"MATCH (c:Company {{companyNumber: '{company}'}}) "
         f"CALL apoc.path.expandConfig(c, {{"
@@ -1518,14 +1518,7 @@ def _ownership_query(company, direction="both"):
         f"  minLevel: 1, maxLevel: 15, "
         f"  uniqueness: 'NODE_GLOBAL', "
         f"  limit: 200"
-        f"}}) YIELD path "
-        f"WITH path "
-        f"WHERE ALL(r IN relationships(path) WHERE "
-        f"  CASE type(r) "
-        f"    WHEN 'HAS_SIGNIFICANT_CONTROL' THEN r.ceasedOn IS NULL "
-        f"    ELSE true "
-        f"  END) "
-        f"RETURN path"
+        f"}}) YIELD path RETURN path"
     )
 
 
