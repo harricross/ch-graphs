@@ -283,7 +283,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <button class="btn" onclick="toggleLayout()">Re-layout</button>
       <button class="btn" onclick="network.fit()">Fit View</button>
       <button class="btn" id="autoBtn" onclick="autoResolve()">Auto-resolve all</button>
-      <label style="font-size:11px; color:#888; margin-left:4px;">Max: <input type="number" id="autoMax" value="200" min="10" max="5000" style="width:55px; background:#1a1a2e; color:#eee; border:1px solid #4a4a7a; border-radius:3px; padding:2px 4px; font-size:11px;"></label>
+      <label style="font-size:11px; color:#888; margin-left:4px;">Hops: <input type="number" id="autoMaxHops" value="3" min="1" max="20" style="width:40px; background:#1a1a2e; color:#eee; border:1px solid #4a4a7a; border-radius:3px; padding:2px 4px; font-size:11px;"></label>
       <div id="autoStatus" style="font-size:11px; color:#888; margin-top:4px;"></div>
       <button class="btn" id="formerBtn" onclick="toggleFormer()">Former Officers: Off</button>
       <button class="btn" id="dormantBtn" onclick="toggleDormant()">Dormant: Shown</button>
@@ -822,51 +822,69 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     var expanded = {};
     function autoResolve() {
       if (autoRunning) { autoRunning = false; document.getElementById('autoBtn').textContent = 'Auto-resolve all'; return; }
-      // Switch to force layout for large auto-resolved graphs
-      // Positions will be computed server-side for each expand call
       autoRunning = true;
       document.getElementById('autoBtn').textContent = 'Stop auto-resolve';
-      autoStep();
+      autoHop = 0;
+      autoMaxHops = parseInt(document.getElementById('autoMaxHops').value) || 3;
+      // Track which companies existed before this hop (to find new ones after)
+      autoPrevCompanies = new Set(nodes.get().filter(function(n) { return n.group === 'Company'; }).map(function(n) { return (n.properties || {}).companyNumber || ''; }));
+      autoHopStep('companies');
     }
-    function autoStep() {
+
+    var autoHop = 0;
+    var autoMaxHops = 3;
+    var autoPrevCompanies = new Set();
+
+    function autoHopStep(phase) {
       if (!autoRunning) { document.getElementById('autoStatus').textContent = 'Stopped'; return; }
-      var allNodes = nodes.get();
 
-      // Safety limit
-      var maxNodes = parseInt(document.getElementById('autoMax').value) || 200;
-      if (allNodes.length >= maxNodes) {
-        autoRunning = false;
-        document.getElementById('autoBtn').textContent = 'Auto-resolve all';
-        document.getElementById('autoStatus').textContent = 'Stopped — limit of ' + maxNodes + ' nodes reached (' + allNodes.length + ' nodes)';
-        network.fit({ animation: true });
-        return;
-      }
-
-      var target = null;
-
-      // Phase 1: Find unexpanded Company or CorporateEntity nodes
-      for (var i = 0; i < allNodes.length; i++) {
-        var n = allNodes[i];
-        var cn = (n.properties || {}).companyNumber || '';
-        if (n.group === 'Company' && cn && !expanded['company:' + cn]) {
-          target = { type: 'company', id: cn, key: 'company:' + cn };
-          break;
-        }
-        if (n.group === 'CorporateEntity' && !expanded['corporate:' + n.id]) {
-          var regNum = (n.properties || {}).registrationNumber || '';
-          if (regNum) {
-            var padded = /^\\d+$/.test(regNum) ? ('00000000' + regNum).slice(-8) : regNum;
-            if (!expanded['company:' + padded]) {
-              target = { type: 'company', id: padded, key: 'company:' + padded };
-              break;
-            }
+      if (phase === 'companies') {
+        // Find unexpanded companies in the current frontier
+        var allNodes = nodes.get();
+        var target = null;
+        for (var i = 0; i < allNodes.length; i++) {
+          var n = allNodes[i];
+          var cn = (n.properties || {}).companyNumber || '';
+          if (n.group === 'Company' && cn && !expanded['company:' + cn]) {
+            target = { type: 'company', id: cn, key: 'company:' + cn };
+            break;
           }
-          expanded['corporate:' + n.id] = true;
+          if (n.group === 'CorporateEntity' && !expanded['corporate:' + n.id]) {
+            var regNum = (n.properties || {}).registrationNumber || '';
+            if (regNum) {
+              var padded = /^\\d+$/.test(regNum) ? ('00000000' + regNum).slice(-8) : regNum;
+              if (!expanded['company:' + padded]) {
+                target = { type: 'company', id: padded, key: 'company:' + padded };
+                break;
+              }
+            }
+            expanded['corporate:' + n.id] = true;
+          }
         }
-      }
 
-      // Phase 2: If all ownership trees expanded, fetch directors for companies missing them
-      if (!target) {
+        if (!target) {
+          // All companies in this hop expanded — now fetch directors for this hop
+          autoHopStep('directors');
+          return;
+        }
+
+        expanded[target.key] = true;
+        document.getElementById('autoStatus').textContent = 'Hop ' + (autoHop + 1) + '/' + autoMaxHops + ': expanding ' + target.id + ' (' + allNodes.length + ' nodes)';
+        fetch('/api/expand?type=' + encodeURIComponent(target.type) + '&id=' + encodeURIComponent(target.id))
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.nodes && d.nodes.length > 0) mergeData(d);
+            setTimeout(function() { autoHopStep('companies'); }, 200);
+          })
+          .catch(function(e) {
+            document.getElementById('autoStatus').textContent = 'Error: ' + e;
+            setTimeout(function() { autoHopStep('companies'); }, 500);
+          });
+
+      } else if (phase === 'directors') {
+        // Fetch directors for all companies that don't have them
+        var allNodes = nodes.get();
+        var target = null;
         for (var j = 0; j < allNodes.length; j++) {
           var nd = allNodes[j];
           var cnum = (nd.properties || {}).companyNumber || '';
@@ -875,38 +893,47 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
             break;
           }
         }
-      }
 
-      if (!target) {
-        autoRunning = false;
-        document.getElementById('autoBtn').textContent = 'Auto-resolve all';
-        document.getElementById('autoStatus').textContent = 'Done — all nodes resolved (' + allNodes.length + ' nodes, ' + edges.length + ' edges)';
-        network.fit({ animation: true });
-        return;
-      }
-      expanded[target.key] = true;
-      var count = Object.keys(expanded).length;
-      var label = target.type === 'directors' ? 'directors for ' + target.id : target.id;
-      document.getElementById('autoStatus').textContent = 'Resolving ' + label + ' (' + count + ' expanded, ' + allNodes.length + ' nodes)...';
-      fetch('/api/expand?type=' + encodeURIComponent(target.type) + '&id=' + encodeURIComponent(target.id))
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-          if (d.nodes && d.nodes.length > 0) mergeData(d);
-          // Re-check cap after merge
-          var maxN = parseInt(document.getElementById('autoMax').value) || 200;
-          if (nodes.length >= maxN) {
+        if (!target) {
+          // Directors done for this hop — check if we should do another hop
+          autoHop++;
+          if (autoHop >= autoMaxHops) {
             autoRunning = false;
             document.getElementById('autoBtn').textContent = 'Auto-resolve all';
-            document.getElementById('autoStatus').textContent = 'Stopped — ' + nodes.length + ' nodes (limit ' + maxN + ')';
+            document.getElementById('autoStatus').textContent = 'Done — ' + autoHop + ' hops (' + allNodes.length + ' nodes, ' + edges.length + ' edges)';
             network.fit({ animation: true });
             return;
           }
-          setTimeout(autoStep, 200);
-        })
-        .catch(function(e) {
-          document.getElementById('autoStatus').textContent = 'Error on ' + label + ': ' + e;
-          setTimeout(autoStep, 500);
-        });
+          // Check if new companies were discovered in this hop
+          var currentCompanies = new Set(nodes.get().filter(function(n) { return n.group === 'Company'; }).map(function(n) { return (n.properties || {}).companyNumber || ''; }));
+          var newCount = 0;
+          currentCompanies.forEach(function(cn) { if (!autoPrevCompanies.has(cn)) newCount++; });
+          if (newCount === 0) {
+            autoRunning = false;
+            document.getElementById('autoBtn').textContent = 'Auto-resolve all';
+            document.getElementById('autoStatus').textContent = 'Done — no new companies after hop ' + autoHop + ' (' + allNodes.length + ' nodes)';
+            network.fit({ animation: true });
+            return;
+          }
+          autoPrevCompanies = currentCompanies;
+          document.getElementById('autoStatus').textContent = 'Starting hop ' + (autoHop + 1) + '/' + autoMaxHops + ' (' + newCount + ' new companies)...';
+          setTimeout(function() { autoHopStep('companies'); }, 200);
+          return;
+        }
+
+        expanded[target.key] = true;
+        document.getElementById('autoStatus').textContent = 'Hop ' + (autoHop + 1) + ': directors for ' + target.id;
+        fetch('/api/expand?type=' + encodeURIComponent(target.type) + '&id=' + encodeURIComponent(target.id))
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.nodes && d.nodes.length > 0) mergeData(d);
+            setTimeout(function() { autoHopStep('directors'); }, 200);
+          })
+          .catch(function(e) {
+            document.getElementById('autoStatus').textContent = 'Error: ' + e;
+            setTimeout(function() { autoHopStep('directors'); }, 500);
+          });
+      }
     }
   </script>
 </body>
