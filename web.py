@@ -312,7 +312,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     };
     var physicsOpts = Object.assign({}, defaultOpts, {
       physics: { enabled: true, solver: 'barnesHut',
-        barnesHut: { gravitationalConstant: -15000, springLength: 400, springConstant: 0.005, damping: 0.3, avoidOverlap: 0.8 },
+        barnesHut: { gravitationalConstant: -20000, springLength: 400, springConstant: 0.004, damping: 0.4, avoidOverlap: 1.0 },
         stabilization: { iterations: 400 } }
     });
 
@@ -568,10 +568,12 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           var beforeCount = nodes.length;
           mergeData(d);
           expanding[key] = false;
-          // If new nodes were added, briefly enable physics to push nodes apart
+          // If new nodes were added, run physics until stable to prevent overlap
           if (nodes.length > beforeCount) {
             network.setOptions(physicsOpts);
-            setTimeout(function() { network.setOptions({ physics: { enabled: false } }); }, 2000);
+            network.once('stabilizationIterationsDone', function() {
+              network.setOptions({ physics: { enabled: false } });
+            });
           }
           var msg = 'Added items';
           if (d.hasMore) {
