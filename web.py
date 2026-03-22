@@ -219,7 +219,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     body { font-family: -apple-system, sans-serif; background: #0f0f1a; color: #eee; }
     #graph { width: 100vw; height: 100vh; }
     #controls { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.85);
-      padding: 14px 18px; border-radius: 10px; font-size: 13px; z-index: 10; max-width: 340px; }
+      padding: 14px 18px; border-radius: 10px; font-size: 13px; z-index: 10; max-width: 360px; max-height: 90vh; overflow-y: auto; }
     #controls h3 { margin: 0 0 8px 0; font-size: 16px; }
     #status { color: #f1c40f; margin: 8px 0; font-size: 12px; min-height: 16px; }
     #status.done { color: #34A853; }
@@ -230,7 +230,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     .legend-line { width: 20px; height: 3px; display: inline-block; border-radius: 1px; }
     .btn { background: #2a2a4a; border: 1px solid #4a4a7a; color: #ccc; padding: 6px 12px;
       border-radius: 5px; cursor: pointer; font-size: 12px; margin: 2px; }
-    .btn:hover { background: #3a3a6a; color: #fff; }
+    .btn.active { background: #4C8BF5; border-color: #4C8BF5; color: #fff; }
     .btn-row { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
     #details { position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.85);
       padding: 14px 18px; border-radius: 10px; font-size: 12px; z-index: 10;
@@ -274,13 +274,13 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <span class="legend-item"><span class="legend-line" style="background:#78909C"></span>Secretary</span>
     </div>
     <div class="btn-row">
-      <button class="btn" onclick="toggleLayout()">Toggle Layout</button>
+      <button class="btn" id="layoutBtn" onclick="toggleLayout()">Layout: Tree</button>
       <button class="btn" onclick="network.fit()">Fit View</button>
       <button class="btn" id="autoBtn" onclick="autoResolve()">Auto-resolve all</button>
       <label style="font-size:11px; color:#888; margin-left:4px;">Max: <input type="number" id="autoMax" value="200" min="10" max="5000" style="width:55px; background:#1a1a2e; color:#eee; border:1px solid #4a4a7a; border-radius:3px; padding:2px 4px; font-size:11px;"></label>
       <div id="autoStatus" style="font-size:11px; color:#888; margin-top:4px;"></div>
-      <button class="btn" onclick="toggleFormer()">Show Former Officers</button>
-      <button class="btn" onclick="toggleDormant()">Hide Dormant</button>
+      <button class="btn" id="formerBtn" onclick="toggleFormer()">Former Officers: Off</button>
+      <button class="btn" id="dormantBtn" onclick="toggleDormant()">Dormant: Shown</button>
     </div>
   </div>
   <div id="details"></div>
@@ -314,19 +314,27 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     var network = new vis.Network(container, data, hierOpts);
     // Auto-disable physics after stabilization so nodes stay in place
     network.on('stabilizationIterationsDone', function() { network.setOptions({ physics: { enabled: false } }); });
-    function toggleLayout() { hierarchical = !hierarchical; network.setOptions(hierarchical ? hierOpts : forceOpts); }
+    function toggleLayout() {
+      hierarchical = !hierarchical;
+      network.setOptions(hierarchical ? hierOpts : forceOpts);
+      var btn = document.getElementById('layoutBtn');
+      btn.textContent = hierarchical ? 'Layout: Tree' : 'Layout: Force';
+    }
+    var dormantHidden = false;
     function toggleDormant() {
-      // Toggle visibility of dormant companies
+      dormantHidden = !dormantHidden;
       var allN = nodes.get();
-      var hiding = !allN.some(function(n) { return n.hidden; });
       allN.forEach(function(n) {
         if (n.group === 'Company') {
           var status = ((n.properties || {}).status || '').toLowerCase();
           if (status.indexOf('dormant') >= 0 || status.indexOf('dissolved') >= 0) {
-            nodes.update({ id: n.id, hidden: hiding });
+            nodes.update({ id: n.id, hidden: dormantHidden });
           }
         }
       });
+      var btn = document.getElementById('dormantBtn');
+      btn.textContent = dormantHidden ? 'Dormant: Hidden' : 'Dormant: Shown';
+      btn.classList.toggle('active', dormantHidden);
     }
     function toggleFormer() {
       var url = new URL(window.location);
@@ -337,6 +345,14 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       }
       window.location = url;
     }
+    // Set initial Former button state from URL
+    (function() {
+      var btn = document.getElementById('formerBtn');
+      if (new URLSearchParams(window.location.search).get('former') === '1') {
+        btn.textContent = 'Former Officers: On';
+        btn.classList.add('active');
+      }
+    })();
     function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
     function findPathToRoot(startId) {
