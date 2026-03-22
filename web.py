@@ -565,8 +565,14 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(d) {
+          var beforeCount = nodes.length;
           mergeData(d);
           expanding[key] = false;
+          // If new nodes were added, briefly enable physics to push nodes apart
+          if (nodes.length > beforeCount) {
+            network.setOptions(physicsOpts);
+            setTimeout(function() { network.setOptions({ physics: { enabled: false } }); }, 2000);
+          }
           var msg = 'Added items';
           if (d.hasMore) {
             msg += ' (more available)';
