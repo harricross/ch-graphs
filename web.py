@@ -47,7 +47,26 @@ def get_driver():
     if driver is None:
         driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
         driver.verify_connectivity()
+        _fix_is_company_links(driver)
     return driver
+
+
+def _fix_is_company_links(d):
+    """Create missing IS_COMPANY rels where registration_number needs zero-padding."""
+    with d.session() as s:
+        result = s.run("""
+            MATCH (ce:CorporateEntity)
+            WHERE ce.registrationNumber IS NOT NULL
+              AND NOT (ce)-[:IS_COMPANY]->(:Company)
+              AND ce.registrationNumber =~ '^[0-9]+$'
+            WITH ce, right('00000000' + ce.registrationNumber, 8) AS padded
+            MATCH (co:Company {companyNumber: padded})
+            MERGE (ce)-[:IS_COMPANY]->(co)
+            RETURN count(*) AS fixed
+        """)
+        n = result.single()["fixed"]
+        if n:
+            print(f"[startup] Fixed {n} IS_COMPANY links via zero-padding")
 
 
 # ---------------------------------------------------------------------------

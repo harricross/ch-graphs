@@ -71,12 +71,20 @@ def make_person_id(data):
     return "|".join(p.strip().upper() for p in parts)
 
 
+def pad_company_number(num):
+    """Zero-pad purely numeric company numbers to 8 digits."""
+    num = num.strip()
+    if num.isdigit():
+        return num.zfill(8)
+    return num.upper()
+
+
 def make_entity_id(data):
     ident = data.get("identification", {})
     reg = ident.get("registration_number", "")
     name = data.get("name", "")
     if reg:
-        return f"REG|{reg.strip().upper()}"
+        return f"REG|{pad_company_number(reg)}"
     return f"NAME|{name.strip().upper()}"
 
 
@@ -346,9 +354,10 @@ def process_psc(psc_jsonl, out_dir):
                 rel_corp_w.writerow([eid, company_number, noc, notified, ceased])
 
                 # Cross-reference: corporate PSC -> Company node (deduplicated)
-                if reg_num and eid not in seen_is_company:
+                padded_reg = pad_company_number(reg_num) if reg_num else ""
+                if padded_reg and eid not in seen_is_company:
                     seen_is_company.add(eid)
-                    rel_is_co_w.writerow([eid, reg_num])
+                    rel_is_co_w.writerow([eid, padded_reg])
 
             elif kind == "legal-person-person-with-significant-control":
                 eid = make_entity_id(data)
