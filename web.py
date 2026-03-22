@@ -330,7 +330,16 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         var cn = props.companyNumber || '';
         var h = '<h4>' + escHtml(node.group || '') + '</h4>';
         if (cn && node.group === 'Company') {
-          h += '<button class="expand-btn" onclick="expandCompany(&quot;' + escHtml(cn) + '&quot;)">Expand ownership tree</button>';
+          h += '<button class="expand-btn" onclick="expandNode(&quot;company&quot;, &quot;' + escHtml(cn) + '&quot;)">Expand ownership tree</button>';
+        }
+        if (node.group === 'Person' || node.group === 'Director') {
+          h += '<button class="expand-btn" onclick="expandNode(&quot;person&quot;, &quot;' + escHtml(nodeId) + '&quot;)">Find all companies</button>';
+        }
+        if (node.group === 'CorporateEntity') {
+          var regNum = props.registrationNumber || '';
+          if (regNum) {
+            h += '<button class="expand-btn" onclick="expandNode(&quot;company&quot;, &quot;' + escHtml(regNum) + '&quot;)">Expand as company</button>';
+          }
         }
         h += '<table>';
         Object.keys(props).forEach(function(key) {
@@ -347,19 +356,24 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       if (params.nodes.length > 0) {
         var node = nodes.get(params.nodes[0]);
         var cn = (node.properties || {}).companyNumber;
-        if (cn && node.group === 'Company') expandCompany(cn);
+        if (cn && node.group === 'Company') expandNode('company', cn);
+        else if (node.group === 'Person' || node.group === 'Director') expandNode('person', params.nodes[0]);
+        else if (node.group === 'CorporateEntity') {
+          var regNum = (node.properties || {}).registrationNumber;
+          if (regNum) expandNode('company', regNum);
+        }
       }
     });
 
     var expanding = {};
-    function expandCompany(cn) {
-      if (expanding[cn]) return;
-      expanding[cn] = true;
-      setStatus('Expanding ' + cn + '...');
-      fetch('/api/expand?company=' + encodeURIComponent(cn))
+    function expandNode(type, id) {
+      if (expanding[id]) return;
+      expanding[id] = true;
+      setStatus('Expanding ' + id + '...');
+      fetch('/api/expand?type=' + encodeURIComponent(type) + '&id=' + encodeURIComponent(id))
         .then(function(r) { return r.json(); })
-        .then(function(d) { mergeData(d); expanding[cn] = false; setStatus('Expanded ' + cn, 'done'); })
-        .catch(function(e) { expanding[cn] = false; setStatus('Error: ' + e, 'error'); });
+        .then(function(d) { mergeData(d); expanding[id] = false; setStatus('Expanded ' + id, 'done'); })
+        .catch(function(e) { expanding[id] = false; setStatus('Error: ' + e, 'error'); });
     }
 
     function mergeData(d) {
@@ -687,33 +701,46 @@ def _directors_query(company, include_former=False):
 
 @app.route("/api/expand")
 def api_expand():
-    """API endpoint: return graph data for a company's ownership tree as JSON.
-    Used by the frontend to expand nodes inline."""
-    company = request.args.get("company", "").strip().upper()
-    if not company:
-        return jsonify({"error": "Missing company parameter"}), 400
+    """API endpoint: return graph data for expanding a node inline.
+    Supports ?type=company&id=00253240 or ?type=person&id=<neo4j_id>
+    Legacy: ?company=00253240 still works."""
+    expand_type = request.args.get("type", "company")
+    expand_id = request.args.get("id", request.args.get("company", "")).strip()
+    if not expand_id:
+        return jsonify({"error": "Missing id parameter"}), 400
 
     d = get_driver()
 
-    # Check company exists
-    with d.session() as session:
-        result = session.run(
-            "MATCH (c:Company {companyNumber: $cn}) RETURN c.name AS name", cn=company
-        )
-        if not result.single():
-            return jsonify({"error": f"Company {company} not found"}), 404
+    if expand_type == "company":
+        company = expand_id.upper()
+        with d.session() as session:
+            result = session.run(
+                "MATCH (c:Company {companyNumber: $cn}) RETURN c.name AS name", cn=company
+            )
+            if not result.single():
+                return jsonify({"error": f"Company {company} not found"}), 404
 
-    # Fetch directors if needed
-    if CH_API_KEY:
-        _ensure_directors(d, company)
+        if CH_API_KEY:
+            _ensure_directors(d, company)
 
-    # Ownership tree (bidirectional)
-    query = _ownership_query(company, "both")
-    dir_query = _directors_query(company)
+        query = _ownership_query(company, "both")
+        dir_query = _directors_query(company)
 
-    with d.session() as session:
-        records = list(session.run(query))
-        records.extend(list(session.run(dir_query)))
+        with d.session() as session:
+            records = list(session.run(query))
+            records.extend(list(session.run(dir_query)))
+
+    elif expand_type == "person":
+        # Find all companies this person/director controls or is officer of
+        with d.session() as session:
+            records = list(session.run(
+                "MATCH (n) WHERE elementId(n) = $nid "
+                "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL|OFFICER_OF]->(c:Company) "
+                "RETURN path",
+                nid=expand_id,
+            ))
+    else:
+        return jsonify({"error": f"Unknown type: {expand_type}"}), 400
 
     if not records:
         return jsonify({"nodes": [], "edges": []})
