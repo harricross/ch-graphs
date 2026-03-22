@@ -277,6 +277,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <button class="btn" onclick="network.fit()">Fit View</button>
       <button class="btn" onclick="togglePhysics()">Toggle Physics</button>
       <button class="btn" id="autoBtn" onclick="autoResolve()">Auto-resolve all</button>
+      <label style="font-size:11px; color:#888; margin-left:4px;">Max: <input type="number" id="autoMax" value="200" min="10" max="5000" style="width:55px; background:#1a1a2e; color:#eee; border:1px solid #4a4a7a; border-radius:3px; padding:2px 4px; font-size:11px;"></label>
       <div id="autoStatus" style="font-size:11px; color:#888; margin-top:4px;"></div>
       <button class="btn" onclick="toggleFormer()">Show Former Officers</button>
     </div>
@@ -323,6 +324,58 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     }
     function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+    function findPathToRoot(startId) {
+      if (!rootNodeId || startId === rootNodeId) return '';
+      // BFS from startId to rootNodeId through edges (ignore direction)
+      var visited = {};
+      var parent = {};
+      var queue = [startId];
+      visited[startId] = true;
+      var found = false;
+      var allEdges = edges.get();
+      while (queue.length > 0 && !found) {
+        var current = queue.shift();
+        for (var i = 0; i < allEdges.length; i++) {
+          var e = allEdges[i];
+          var neighbor = null;
+          if (e.from === current) neighbor = e.to;
+          else if (e.to === current) neighbor = e.from;
+          if (neighbor && !visited[neighbor]) {
+            visited[neighbor] = true;
+            parent[neighbor] = { from: current, edge: e };
+            if (neighbor === rootNodeId) { found = true; break; }
+            queue.push(neighbor);
+          }
+        }
+      }
+      if (!found) return '<span style="color:#666; font-size:11px;">No path found</span>';
+      // Build path
+      var path = [];
+      var cur = rootNodeId;
+      while (cur !== startId) {
+        path.unshift(cur);
+        var p = parent[cur];
+        if (!p) break;
+        cur = p.from;
+      }
+      path.unshift(startId);
+      // Render as clickable breadcrumbs
+      var html = '<div style="font-size: 11px; line-height: 1.8;">';
+      path.forEach(function(nid, idx) {
+        var n = nodes.get(nid);
+        if (!n) return;
+        var name = (n.properties || {}).name || (n.properties || {}).companyNumber || n.label || '?';
+        if (name.length > 30) name = name.substring(0, 27) + '...';
+        var color = n.color.background || n.color || '#999';
+        html += '<span style="cursor:pointer; color:' + color + ';" onclick="network.focus(\'' + nid + '\', {scale:1.2, animation:true}); network.selectNodes([\'' + nid + '\'])">';
+        html += escHtml(name);
+        html += '</span>';
+        if (idx < path.length - 1) html += ' <span style="color:#555;">→</span> ';
+      });
+      html += '</div>';
+      return html;
+    }
+
     // Click to show details
     network.on('click', function(params) {
       var panel = document.getElementById('details');
@@ -359,6 +412,16 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           h += '<tr><td>' + escHtml(key) + '</td><td>' + escHtml(props[key]) + '</td></tr>';
         });
         h += '</table>';
+
+        // Find path back to root node
+        var pathHtml = findPathToRoot(nodeId);
+        if (pathHtml) {
+          h += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #333;">';
+          h += '<div style="color: #888; font-size: 11px; margin-bottom: 4px;">Path to root:</div>';
+          h += pathHtml;
+          h += '</div>';
+        }
+
         panel.innerHTML = h;
         panel.style.display = 'block';
       } else { panel.style.display = 'none'; }
@@ -651,7 +714,6 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     // Auto-resolve: keep expanding all unexpanded Company/CorporateEntity nodes
     var autoRunning = false;
     var expanded = {};
-    var AUTO_MAX_NODES = 200;
     function autoResolve() {
       if (autoRunning) { autoRunning = false; document.getElementById('autoBtn').textContent = 'Auto-resolve all'; return; }
       // Switch to force layout for large auto-resolved graphs
@@ -665,10 +727,11 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       var allNodes = nodes.get();
 
       // Safety limit
-      if (allNodes.length >= AUTO_MAX_NODES) {
+      var maxNodes = parseInt(document.getElementById('autoMax').value) || 200;
+      if (allNodes.length >= maxNodes) {
         autoRunning = false;
         document.getElementById('autoBtn').textContent = 'Auto-resolve all';
-        document.getElementById('autoStatus').textContent = 'Stopped — limit of ' + AUTO_MAX_NODES + ' nodes reached (' + allNodes.length + ' nodes)';
+        document.getElementById('autoStatus').textContent = 'Stopped — limit of ' + maxNodes + ' nodes reached (' + allNodes.length + ' nodes)';
         network.fit({ animation: true });
         return;
       }
