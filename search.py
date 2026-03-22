@@ -546,8 +546,8 @@ def export_html(nodes, rels, flat_rows, output_path):
                   props.get("code", props.get("postcode",
                   props.get("personId", props.get("entityId", str(n["id"])))))))
         # Truncate long names
-        if isinstance(display, str) and len(display) > 50:
-            display = display[:47] + "..."
+        if isinstance(display, str) and len(display) > 30:
+            display = display[:27] + "..."
 
         # Add type and key info to label
         cn = props.get("companyNumber", "")
@@ -718,7 +718,7 @@ def export_html(nodes, rels, flat_rows, output_path):
           direction: 'UD',
           sortMethod: 'directed',
           levelSeparation: 150,
-          nodeSpacing: 200,
+          nodeSpacing: 250,
           treeSpacing: 250,
           blockShifting: true,
           edgeMinimization: true,
@@ -737,12 +737,13 @@ def export_html(nodes, rels, flat_rows, output_path):
         stabilization: {{ iterations: 300 }}
       }},
       nodes: {{
-        font: {{ color: '#eee', size: 11, multi: 'md' }},
-        borderWidth: 2
+        font: {{ color: '#eee', size: 10, multi: 'md', face: 'arial' }},
+        borderWidth: 2,
+        widthConstraint: {{ maximum: 150 }}
       }},
       edges: {{
         color: {{ color: '#666', highlight: '#fff', hover: '#aaa' }},
-        font: {{ color: '#999', size: 9, strokeWidth: 0 }},
+        font: {{ color: '#999', size: 8, strokeWidth: 0, background: 'rgba(0,0,0,0.5)' }},
         smooth: {{ type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 }},
         width: 1.5
       }},
