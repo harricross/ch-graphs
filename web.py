@@ -1467,6 +1467,29 @@ def api_expand():
                 "RETURN path SKIP $skip LIMIT $lim",
                 nid=expand_id, skip=offset, lim=limit + 1,
             ))
+
+            # If no results (possibly deduped node), try matching Director by name
+            if not person_records:
+                # Get the node's name from Neo4j
+                name_result = session.run(
+                    "MATCH (n) WHERE elementId(n) = $nid RETURN n.name AS name", nid=expand_id
+                )
+                name_rec = name_result.single()
+                if name_rec and name_rec["name"]:
+                    name = name_rec["name"]
+                    person_records = list(session.run(
+                        "MATCH (n:Director) WHERE n.name = $name "
+                        "MATCH path = (n)-[:OFFICER_OF]->(c:Company) "
+                        "RETURN path LIMIT $lim",
+                        name=name, lim=limit,
+                    ))
+                    # Also try Person
+                    person_records.extend(list(session.run(
+                        "MATCH (n:Person) WHERE n.name = $name "
+                        "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL]->(c:Company) "
+                        "RETURN path LIMIT $lim",
+                        name=name, lim=limit,
+                    )))
             if len(person_records) > limit:
                 person_records = person_records[:limit]
                 has_more = True
