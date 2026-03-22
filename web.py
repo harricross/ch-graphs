@@ -320,7 +320,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         var cn = props.companyNumber || '';
         var h = '<h4>' + escHtml(node.group || '') + '</h4>';
         if (cn && node.group === 'Company') {
-          h += '<button class="expand-btn" onclick="expandCompany(\'' + escHtml(cn) + '\')">Expand ownership tree</button>';
+          h += '<button class="expand-btn" onclick="expandCompany(&quot;' + escHtml(cn) + '&quot;)">Expand ownership tree</button>';
         }
         h += '<table>';
         Object.keys(props).forEach(function(key) {
