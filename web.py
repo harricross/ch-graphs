@@ -275,6 +275,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <button class="btn" onclick="toggleLayout()">Toggle Layout</button>
       <button class="btn" onclick="network.fit()">Fit View</button>
       <button class="btn" onclick="togglePhysics()">Toggle Physics</button>
+      <button class="btn" onclick="toggleFormer()">Show Former Officers</button>
     </div>
   </div>
   <div id="details"></div>
@@ -308,6 +309,15 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     var network = new vis.Network(container, data, hierOpts);
     function toggleLayout() { hierarchical = !hierarchical; network.setOptions(hierarchical ? hierOpts : forceOpts); }
     function togglePhysics() { physicsOn = !physicsOn; network.setOptions({ physics: { enabled: physicsOn } }); }
+    function toggleFormer() {
+      var url = new URL(window.location);
+      if (url.searchParams.get('former') === '1') {
+        url.searchParams.delete('former');
+      } else {
+        url.searchParams.set('former', '1');
+      }
+      window.location = url;
+    }
     function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
     // Click to show details
@@ -375,7 +385,10 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     }
 
     // Stream data from server via SSE
-    var evtSource = new EventSource('/api/stream?company={{ company }}');
+    var urlParams = new URLSearchParams(window.location.search);
+    var showFormer = urlParams.get('former') === '1';
+    var streamUrl = '/api/stream?company={{ company }}' + (showFormer ? '&former=1' : '');
+    var evtSource = new EventSource(streamUrl);
     evtSource.addEventListener('status', function(e) { setStatus(e.data); });
     evtSource.addEventListener('data', function(e) {
       var d = JSON.parse(e.data);
@@ -408,6 +421,7 @@ def graph():
 def api_stream():
     """SSE endpoint that streams graph data as it's built."""
     company = request.args.get("company", "").strip().upper()
+    include_former = request.args.get("former", "") == "1"
     if not company:
         return "Missing company", 400
 
@@ -473,23 +487,35 @@ def api_stream():
 
             # 4. Query directors
             yield send("status", "Loading directors...")
-            dir_query = _directors_query(company)
+            dir_query = _directors_query(company, include_former=include_former)
             with d.session() as session:
                 dir_records = list(session.run(dir_query))
 
             if not dir_records:
                 # Fallback for single company
+                resigned_filter = "" if include_former else "WHERE r.resignedOn IS NULL "
                 with d.session() as session:
                     dir_records = list(session.run(
-                        "MATCH dirPath = (dd:Director)-[:OFFICER_OF]->(c:Company {companyNumber: $cn}) "
-                        "RETURN dirPath AS path", cn=company
+                        f"MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(c:Company {{companyNumber: $cn}}) "
+                        f"{resigned_filter}"
+                        f"RETURN dirPath AS path", cn=company
                     ))
 
             if dir_records:
                 nodes_data, rels_data, _ = extract_graph_data(dir_records)
                 vis = _build_vis_data(nodes_data, rels_data)
-                yield send("data", _json.dumps(vis, default=str))
-                yield send("status", f"Loaded {len(vis['nodes'])} directors")
+                # Send in chunks to avoid huge SSE payloads
+                chunk_size = 50
+                all_nodes = vis.get("nodes", [])
+                all_edges = vis.get("edges", [])
+                for i in range(0, max(len(all_nodes), len(all_edges)), chunk_size):
+                    chunk = {
+                        "nodes": all_nodes[i:i+chunk_size],
+                        "edges": all_edges[i:i+chunk_size],
+                    }
+                    if chunk["nodes"] or chunk["edges"]:
+                        yield send("data", _json.dumps(chunk, default=str))
+                yield send("status", f"Loaded {len(all_nodes)} directors")
 
         yield send("done", "Complete")
 
@@ -642,8 +668,9 @@ def _ownership_query(company, direction="both"):
         )
 
 
-def _directors_query(company):
+def _directors_query(company, include_former=False):
     """Get directors for all companies in the ownership tree."""
+    where_clause = "" if include_former else "WHERE r.resignedOn IS NULL "
     return (
         f"MATCH (c:Company {{companyNumber: '{company}'}}) "
         f"CALL apoc.path.expandConfig(c, {{"
@@ -652,7 +679,8 @@ def _directors_query(company):
         f"  uniqueness: 'NODE_GLOBAL'"
         f"}}) YIELD path "
         f"UNWIND nodes(path) AS n WITH n WHERE n:Company "
-        f"MATCH dirPath = (dd:Director)-[:OFFICER_OF]->(n) "
+        f"MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(n) "
+        f"{where_clause}"
         f"RETURN dirPath AS path"
     )
 
