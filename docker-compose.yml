@@ -39,12 +39,21 @@ services:
       retries: 10
 
   web:
-    image: nginx:alpine
+    build: .
     container_name: chsearch-web
     ports:
-      - "8080:80"
+      - "8080:5000"
     volumes:
-      - ./exports:/usr/share/nginx/html:ro
+      - ./exports:/app/exports
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=companies2026
+    env_file:
+      - .env
+    depends_on:
+      neo4j:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
