@@ -261,6 +261,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" fill="#FBBC04"/></svg>Corp Entity</span>
       <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,1 13,13 1,13" fill="#EA4335"/></svg>Legal Person</span>
       <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,13 1,1 13,1" fill="#00BCD4"/></svg>Director</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="none" stroke="#FF6600" stroke-width="3"/></svg>PSC + Director</span>
     </div>
     <div style="margin-top: 6px; font-size: 11px; color: #aaa;">Arrow colours:</div>
     <div class="legend" style="margin-top: 2px;">
@@ -453,6 +454,57 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
 
     function updateStats() {
       document.getElementById('stats').textContent = nodes.length + ' nodes, ' + edges.length + ' edges';
+      detectDualRoles();
+    }
+
+    function detectDualRoles() {
+      // Find nodes that are both a PSC and a Director (by name match on same company)
+      var allNodes = nodes.get();
+      var allEdges = edges.get();
+
+      // Build map: companyId -> { persons: [{id, name}], directors: [{id, name}] }
+      var companyLinks = {};
+      allEdges.forEach(function(e) {
+        var source = nodes.get(e.from);
+        if (!source) return;
+        var target = e.to;
+        if (!companyLinks[target]) companyLinks[target] = { persons: [], directors: [] };
+        var name = ((source.properties || {}).name || '').toUpperCase().replace(/\s+/g, ' ').trim();
+        if (!name) return;
+        if (source.group === 'Person') companyLinks[target].persons.push({ id: source.id, name: name });
+        if (source.group === 'Director') companyLinks[target].directors.push({ id: source.id, name: name });
+      });
+
+      // Find matches
+      var dualIds = {};
+      Object.values(companyLinks).forEach(function(cl) {
+        cl.persons.forEach(function(p) {
+          cl.directors.forEach(function(d) {
+            // Fuzzy match: check if surname matches (last word)
+            var pParts = p.name.split(' ');
+            var dParts = d.name.split(',')[0].trim().split(' ');  // Director names are "SURNAME, Forename"
+            var pSurname = pParts[pParts.length - 1];
+            var dSurname = dParts[0];
+            if (pSurname === dSurname || p.name === d.name) {
+              dualIds[p.id] = true;
+              dualIds[d.id] = true;
+            }
+          });
+        });
+      });
+
+      // Mark dual-role nodes with a distinctive border
+      Object.keys(dualIds).forEach(function(nid) {
+        var n = nodes.get(nid);
+        if (n && !n._dualMarked) {
+          nodes.update({
+            id: nid,
+            borderWidth: 4,
+            color: { border: '#FF6600', background: n.color.background || n.color },
+            _dualMarked: true
+          });
+        }
+      });
     }
 
     function setStatus(msg, cls) {
