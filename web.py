@@ -402,7 +402,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           var regNum = props.registrationNumber || '';
           if (regNum) {
             // Pad to 8 digits if purely numeric
-            var padded = /^\d+$/.test(regNum) ? ('00000000' + regNum).slice(-8) : regNum;
+            var padded = /^\\d+$/.test(regNum) ? ('00000000' + regNum).slice(-8) : regNum;
             h += '<button class="expand-btn" onclick="expandNode(&quot;company&quot;, &quot;' + escHtml(padded) + '&quot;)">Expand as company</button>';
           }
           h += '<button class="expand-btn" onclick="expandNode(&quot;corporate&quot;, &quot;' + escHtml(nodeId) + '&quot;)">Find controlled companies</button>';
@@ -479,7 +479,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           if (reg) {
             // Store both raw and padded versions
             regNumToNodeId[reg] = n.id;
-            if (/^\d+$/.test(reg)) regNumToNodeId[('00000000' + reg).slice(-8)] = n.id;
+            if (/^\\d+$/.test(reg)) regNumToNodeId[('00000000' + reg).slice(-8)] = n.id;
           }
         }
       });
@@ -529,7 +529,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           // Check if this new CorporateEntity matches an existing Company
           if (n.group === 'CorporateEntity') {
             var reg = (n.properties || {}).registrationNumber || '';
-            var padded = /^\d+$/.test(reg) ? ('00000000' + reg).slice(-8) : reg;
+            var padded = /^\\d+$/.test(reg) ? ('00000000' + reg).slice(-8) : reg;
             if (reg && cnToNodeId[padded]) {
               remap[n.id] = cnToNodeId[padded];
               return;  // skip, company already exists
@@ -749,7 +749,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         if (n.group === 'CorporateEntity' && !expanded['corporate:' + n.id]) {
           var regNum = (n.properties || {}).registrationNumber || '';
           if (regNum) {
-            var padded = /^\d+$/.test(regNum) ? ('00000000' + regNum).slice(-8) : regNum;
+            var padded = /^\\d+$/.test(regNum) ? ('00000000' + regNum).slice(-8) : regNum;
             if (!expanded['company:' + padded]) {
               target = { type: 'company', id: padded, key: 'company:' + padded };
               break;
