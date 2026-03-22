@@ -297,6 +297,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     var container = document.getElementById('graph');
     var data = { nodes: nodes, edges: edges };
     // Positions computed server-side, no physics needed initially
+    var initialFitDone = false;
 
     var defaultOpts = {
       layout: { hierarchical: { enabled: false } },
@@ -751,7 +752,8 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         }
       });
       updateStats();
-      if (added > 0) {
+      if (added > 0 && !initialFitDone) {
+        initialFitDone = true;
         network.fit({ animation: true });
       }
     }
