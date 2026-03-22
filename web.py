@@ -1077,19 +1077,24 @@ def api_stream():
                 dir_records = list(session.run(dir_query))
 
             if dir_records:
-                # Combine ALL records (ownership + directors) for proper merge
+                # Process directors only (not combined with ownership — that was already sent)
+                # But include ownership records for Person/Director merge detection
                 all_records.extend(dir_records)
                 all_nodes, all_rels, _ = extract_graph_data(all_records)
                 vis = _build_vis_data(all_nodes, all_rels)
-                # Send as chunks
-                chunk_size = 100
-                vn = vis.get("nodes", [])
-                ve = vis.get("edges", [])
-                for i in range(0, max(len(vn), len(ve)), chunk_size):
-                    chunk = {"nodes": vn[i:i+chunk_size], "edges": ve[i:i+chunk_size]}
-                    if chunk["nodes"] or chunk["edges"]:
-                        yield send("data", _json.dumps(chunk, default=str))
-                yield send("status", f"{len(vn)} nodes, {len(ve)} edges (merged)")
+
+                # Only send nodes/edges that are Director-related (not already sent ownership data)
+                dir_node_ids = set()
+                for r in all_rels:
+                    if r["type"] == "OFFICER_OF":
+                        dir_node_ids.add(r["startId"])
+                # Filter to director nodes + their edges only
+                dir_nodes = [n for n in vis.get("nodes", []) if n["id"] in dir_node_ids or n.get("borderWidth")]
+                dir_edges = [e for e in vis.get("edges", []) if e.get("title", "").startswith(("Director", "Secretary", "Corporate"))]
+
+                if dir_nodes or dir_edges:
+                    yield send("data", _json.dumps({"nodes": dir_nodes, "edges": dir_edges}, default=str))
+                yield send("status", f"{len(dir_nodes)} directors loaded")
 
         stats["graphs_served"] += 1
         yield send("done", "Complete")
