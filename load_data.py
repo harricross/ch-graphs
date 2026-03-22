@@ -100,8 +100,13 @@ def process_companies(company_csv, out_dir):
     company_w.writerow([
         "companyNumber:ID(Company)", "name", "category", "status",
         "countryOfOrigin", "incorporationDate", "dissolutionDate", "uri",
-        "postcode", "addressLine1", "addressLine2", "postTown", "county", "country",
-        "accountCategory", "numMortCharges:int", "numMortOutstanding:int",
+        "careOf", "poBox", "postcode", "addressLine1", "addressLine2", "postTown", "county", "country",
+        "accountCategory", "accountRefDay:int", "accountRefMonth:int",
+        "accountsNextDueDate", "accountsLastMadeUpDate",
+        "returnsNextDueDate", "returnsLastMadeUpDate",
+        "numMortCharges:int", "numMortOutstanding:int",
+        "numMortPartSatisfied:int", "numMortSatisfied:int",
+        "numGenPartners:int", "numLimPartners:int",
         "confStmtNextDueDate", "confStmtLastMadeUpDate",
         "previousNames:string[]",
     ])
@@ -159,12 +164,24 @@ def process_companies(company_csv, out_dir):
                 row.get("IncorporationDate", ""),
                 row.get("DissolutionDate", ""),
                 row.get("URI", ""),
+                row.get("RegAddress.CareOf", ""),
+                row.get("RegAddress.POBox", ""),
                 postcode, line1,
                 row.get("RegAddress.AddressLine2", ""),
                 post_town, county, country,
                 row.get("Accounts.AccountCategory", ""),
-                mort_charges if mort_charges else "",
-                mort_outstanding if mort_outstanding else "",
+                row.get("Accounts.AccountRefDay", "") or "",
+                row.get("Accounts.AccountRefMonth", "") or "",
+                row.get("Accounts.NextDueDate", ""),
+                row.get("Accounts.LastMadeUpDate", ""),
+                row.get("Returns.NextDueDate", ""),
+                row.get("Returns.LastMadeUpDate", ""),
+                row.get("Mortgages.NumMortCharges", "") or "",
+                row.get("Mortgages.NumMortOutstanding", "") or "",
+                row.get("Mortgages.NumMortPartSatisfied", "") or "",
+                row.get("Mortgages.NumMortSatisfied", "") or "",
+                row.get("LimitedPartnerships.NumGenPartners", "") or "",
+                row.get("LimitedPartnerships.NumLimPartners", "") or "",
                 row.get("ConfStmtNextDueDate", ""),
                 row.get("ConfStmtLastMadeUpDate", ""),
                 ";".join(prev_names),
@@ -225,27 +242,33 @@ def process_psc(psc_jsonl, out_dir):
     person_w.writerow([
         "personId:ID(Person)", "name", "title", "forename", "middleName", "surname",
         "nationality", "countryOfResidence", "dobMonth:int", "dobYear:int",
+        "addressPremises", "addressLine1", "addressLine2",
+        "addressLocality", "addressRegion", "addressCountry", "addressPostalCode",
     ])
 
     corp_w = csv.writer(corp_f)
     corp_w.writerow([
         "entityId:ID(CorporateEntity)", "name", "registrationNumber",
         "legalForm", "legalAuthority", "countryRegistered", "placeRegistered",
+        "addressPremises", "addressLine1", "addressLine2",
+        "addressLocality", "addressRegion", "addressCountry", "addressPostalCode",
     ])
 
     legal_w = csv.writer(legal_f)
     legal_w.writerow([
         "entityId:ID(LegalPerson)", "name", "legalForm", "legalAuthority",
+        "addressPremises", "addressLine1", "addressLine2",
+        "addressLocality", "addressRegion", "addressCountry", "addressPostalCode",
     ])
 
     rel_ind_w = csv.writer(rel_ind_f)
-    rel_ind_w.writerow([":START_ID(Person)", ":END_ID(Company)", "naturesOfControl:string[]", "notifiedOn"])
+    rel_ind_w.writerow([":START_ID(Person)", ":END_ID(Company)", "naturesOfControl:string[]", "notifiedOn", "ceasedOn"])
 
     rel_corp_w = csv.writer(rel_corp_f)
-    rel_corp_w.writerow([":START_ID(CorporateEntity)", ":END_ID(Company)", "naturesOfControl:string[]", "notifiedOn"])
+    rel_corp_w.writerow([":START_ID(CorporateEntity)", ":END_ID(Company)", "naturesOfControl:string[]", "notifiedOn", "ceasedOn"])
 
     rel_legal_w = csv.writer(rel_legal_f)
-    rel_legal_w.writerow([":START_ID(LegalPerson)", ":END_ID(Company)", "naturesOfControl:string[]", "notifiedOn"])
+    rel_legal_w.writerow([":START_ID(LegalPerson)", ":END_ID(Company)", "naturesOfControl:string[]", "notifiedOn", "ceasedOn"])
 
     rel_is_co_w = csv.writer(rel_is_co_f)
     rel_is_co_w.writerow([":START_ID(CorporateEntity)", ":END_ID(Company)"])
@@ -269,6 +292,17 @@ def process_psc(psc_jsonl, out_dir):
             kind = data.get("kind", "")
             noc = ";".join(x for x in data.get("natures_of_control", []) if x)
             notified = data.get("notified_on", "")
+            ceased = data.get("ceased_on", "")
+            addr = data.get("address", {})
+            addr_fields = [
+                addr.get("premises", ""),
+                addr.get("address_line_1", ""),
+                addr.get("address_line_2", ""),
+                addr.get("locality", ""),
+                addr.get("region", ""),
+                addr.get("country", ""),
+                addr.get("postal_code", ""),
+            ]
 
             if kind == "individual-person-with-significant-control":
                 pid = make_person_id(data)
@@ -288,9 +322,9 @@ def process_psc(psc_jsonl, out_dir):
                         data.get("country_of_residence", ""),
                         dob.get("month", ""),
                         dob.get("year", ""),
-                    ])
+                    ] + addr_fields)
 
-                rel_ind_w.writerow([pid, company_number, noc, notified])
+                rel_ind_w.writerow([pid, company_number, noc, notified, ceased])
 
             elif kind == "corporate-entity-person-with-significant-control":
                 eid = make_entity_id(data)
@@ -307,9 +341,9 @@ def process_psc(psc_jsonl, out_dir):
                         ident.get("legal_authority", ""),
                         ident.get("country_registered", ""),
                         ident.get("place_registered", ""),
-                    ])
+                    ] + addr_fields)
 
-                rel_corp_w.writerow([eid, company_number, noc, notified])
+                rel_corp_w.writerow([eid, company_number, noc, notified, ceased])
 
                 # Cross-reference: corporate PSC -> Company node (deduplicated)
                 if reg_num and eid not in seen_is_company:
@@ -327,9 +361,9 @@ def process_psc(psc_jsonl, out_dir):
                         data.get("name", ""),
                         ident.get("legal_form", ""),
                         ident.get("legal_authority", ""),
-                    ])
+                    ] + addr_fields)
 
-                rel_legal_w.writerow([eid, company_number, noc, notified])
+                rel_legal_w.writerow([eid, company_number, noc, notified, ceased])
 
             else:
                 skipped += 1

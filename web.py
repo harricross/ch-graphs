@@ -331,10 +331,12 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         var h = '<h4>' + escHtml(node.group || '') + '</h4>';
         if (cn && node.group === 'Company') {
           h += '<button class="expand-btn" onclick="expandNode(&quot;company&quot;, &quot;' + escHtml(cn) + '&quot;)">Expand ownership tree</button>';
+          h += '<button class="expand-btn" onclick="expandNode(&quot;directors&quot;, &quot;' + escHtml(cn) + '&quot;)">Load directors</button>';
           var pc = props.postcode || '';
           var addr = props.addressLine1 || '';
           if (pc) {
-            h += '<button class="expand-btn" onclick="expandNode(&quot;address&quot;, &quot;' + escHtml(pc) + '|' + escHtml(addr) + '&quot;)">Companies at ' + escHtml(pc) + '</button>';
+            h += '<button class="expand-btn" onclick="expandNode(&quot;address&quot;, &quot;' + escHtml(pc) + '|' + escHtml(addr) + '&quot;)">Companies at ' + escHtml(addr ? addr + ', ' + pc : pc) + '</button>';
+            h += '<button class="expand-btn" onclick="expandNode(&quot;postcode&quot;, &quot;' + escHtml(pc) + '&quot;)">All companies at ' + escHtml(pc) + '</button>';
           }
         }
         if (node.group === 'Person' || node.group === 'Director') {
@@ -374,14 +376,27 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     });
 
     var expanding = {};
-    function expandNode(type, id) {
-      if (expanding[id]) return;
-      expanding[id] = true;
-      setStatus('Expanding ' + id + '...');
-      fetch('/api/expand?type=' + encodeURIComponent(type) + '&id=' + encodeURIComponent(id))
+    function expandNode(type, id, offset) {
+      var key = type + ':' + id;
+      if (expanding[key]) return;
+      expanding[key] = true;
+      setStatus('Expanding...');
+      var url = '/api/expand?type=' + encodeURIComponent(type) + '&id=' + encodeURIComponent(id);
+      if (offset) url += '&offset=' + offset;
+      fetch(url)
         .then(function(r) { return r.json(); })
-        .then(function(d) { mergeData(d); expanding[id] = false; setStatus('Expanded ' + id, 'done'); })
-        .catch(function(e) { expanding[id] = false; setStatus('Error: ' + e, 'error'); });
+        .then(function(d) {
+          mergeData(d);
+          expanding[key] = false;
+          var msg = 'Added items';
+          if (d.hasMore) {
+            msg += ' (more available)';
+            var panel = document.getElementById('details');
+            panel.innerHTML += '<button class="expand-btn" onclick="expandNode(&quot;' + type + '&quot;, &quot;' + escHtml(id) + '&quot;, ' + d.nextOffset + ')">Load more</button>';
+          }
+          setStatus(msg, 'done');
+        })
+        .catch(function(e) { expanding[key] = false; setStatus('Error: ' + e, 'error'); });
     }
 
     function mergeData(d) {
@@ -613,6 +628,11 @@ def _build_vis_data(nodes, rels):
     for r in rels:
         if r["type"] == "IS_COMPANY" and r["startId"] in ce_to_company:
             continue
+        # Filter out ceased PSCs (ceasedOn is set and non-empty)
+        if r["type"] == "HAS_SIGNIFICANT_CONTROL":
+            ceased = r["properties"].get("ceasedOn", "")
+            if ceased:
+                continue
         merged_rels.append({"startId": remap(r["startId"]), "endId": remap(r["endId"]),
                             "type": r["type"], "properties": r["properties"]})
 
@@ -752,10 +772,13 @@ def api_expand():
     Legacy: ?company=00253240 still works."""
     expand_type = request.args.get("type", "company")
     expand_id = request.args.get("id", request.args.get("company", "")).strip()
+    offset = int(request.args.get("offset", "0"))
+    limit = 50
     if not expand_id:
         return jsonify({"error": "Missing id parameter"}), 400
 
     d = get_driver()
+    has_more = False
 
     if expand_type == "company":
         company = expand_id.upper()
@@ -777,57 +800,79 @@ def api_expand():
             records.extend(list(session.run(dir_query)))
 
     elif expand_type == "person":
-        # Find all companies this person/director controls or is officer of (limit 50)
         with d.session() as session:
             records = list(session.run(
                 "MATCH (n) WHERE elementId(n) = $nid "
                 "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL|OFFICER_OF]->(c:Company) "
-                "RETURN path LIMIT 50",
-                nid=expand_id,
+                "RETURN path SKIP $skip LIMIT $lim",
+                nid=expand_id, skip=offset, lim=limit + 1,
             ))
+            if len(records) > limit:
+                records = records[:limit]
+                has_more = True
 
     elif expand_type == "corporate":
-        # Find all companies this corporate entity controls
         with d.session() as session:
             records = list(session.run(
                 "MATCH (n) WHERE elementId(n) = $nid "
                 "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL]->(c:Company) "
-                "RETURN path LIMIT 50",
-                nid=expand_id,
+                "RETURN path SKIP $skip LIMIT $lim",
+                nid=expand_id, skip=offset, lim=limit + 1,
+            ))
+            if len(records) > limit:
+                records = records[:limit]
+                has_more = True
+
+    elif expand_type == "directors":
+        company = expand_id.upper()
+        if CH_API_KEY:
+            _ensure_directors(d, company)
+        with d.session() as session:
+            records = list(session.run(
+                "MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(c:Company {companyNumber: $cn}) "
+                "WHERE r.resignedOn IS NULL "
+                "RETURN dirPath AS path",
+                cn=company,
             ))
 
     elif expand_type == "address":
-        # Find companies at the same postcode (and optionally same address line)
         parts = expand_id.split("|", 1)
         postcode = parts[0].strip()
         addr_line = parts[1].strip() if len(parts) > 1 else ""
-
         with d.session() as session:
-            if addr_line:
-                # Exact address match first
-                records = list(session.run(
-                    "MATCH (c:Company) "
-                    "WHERE c.postcode = $pc AND c.addressLine1 = $addr "
-                    "RETURN c LIMIT 50",
-                    pc=postcode, addr=addr_line,
-                ))
-            if not addr_line or len(records) < 2:
-                # Fall back to postcode-only match
-                records = list(session.run(
-                    "MATCH (c:Company) "
-                    "WHERE c.postcode = $pc "
-                    "RETURN c LIMIT 50",
-                    pc=postcode,
-                ))
+            records = list(session.run(
+                "MATCH (c:Company) "
+                "WHERE c.postcode = $pc AND c.addressLine1 = $addr "
+                "RETURN c SKIP $skip LIMIT $lim",
+                pc=postcode, addr=addr_line, skip=offset, lim=limit + 1,
+            ))
+            if len(records) > limit:
+                records = records[:limit]
+                has_more = True
+
+    elif expand_type == "postcode":
+        postcode = expand_id.strip()
+        with d.session() as session:
+            records = list(session.run(
+                "MATCH (c:Company) "
+                "WHERE c.postcode = $pc "
+                "RETURN c SKIP $skip LIMIT $lim",
+                pc=postcode, skip=offset, lim=limit + 1,
+            ))
+            if len(records) > limit:
+                records = records[:limit]
+                has_more = True
 
     else:
         return jsonify({"error": f"Unknown type: {expand_type}"}), 400
 
     if not records:
-        return jsonify({"nodes": [], "edges": []})
+        return jsonify({"nodes": [], "edges": [], "hasMore": False})
 
     nodes, rels, _ = extract_graph_data(records)
     vis = _build_vis_data(nodes, rels)
+    vis["hasMore"] = has_more
+    vis["nextOffset"] = offset + limit
     return jsonify(vis)
 
 
