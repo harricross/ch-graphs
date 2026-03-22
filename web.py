@@ -438,16 +438,9 @@ def api_stream():
                 return
         yield send("status", f"Found: {record['name']}")
 
-        # 2. Ownership tree
+        # 2. Ownership tree (bidirectional — up and down the chain)
         yield send("status", "Querying ownership tree...")
-        query = (
-            f"MATCH (c:Company {{companyNumber: '{company}'}}) "
-            f"CALL apoc.path.expandConfig(c, {{"
-            f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
-            f"  minLevel: 1, maxLevel: 30, "
-            f"  uniqueness: 'NODE_GLOBAL'"
-            f"}}) YIELD path RETURN path"
-        )
+        query = _ownership_query(company, "both")
         with d.session() as session:
             records = list(session.run(query))
 
@@ -480,17 +473,7 @@ def api_stream():
 
             # 4. Query directors
             yield send("status", "Loading directors...")
-            dir_query = (
-                f"MATCH (c:Company {{companyNumber: '{company}'}}) "
-                f"CALL apoc.path.expandConfig(c, {{"
-                f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
-                f"  minLevel: 0, maxLevel: 30, "
-                f"  uniqueness: 'NODE_GLOBAL'"
-                f"}}) YIELD path "
-                f"UNWIND nodes(path) AS n WITH n WHERE n:Company "
-                f"MATCH dirPath = (dd:Director)-[:OFFICER_OF]->(n) "
-                f"RETURN dirPath AS path"
-            )
+            dir_query = _directors_query(company)
             with d.session() as session:
                 dir_records = list(session.run(dir_query))
 
@@ -547,6 +530,9 @@ def _build_vis_data(nodes, rels):
         merged_rels.append({"startId": remap(r["startId"]), "endId": remap(r["endId"]),
                             "type": r["type"], "properties": r["properties"]})
 
+    # Compute hierarchy levels
+    levels = _compute_levels(merged_nodes, merged_rels)
+
     seen_edges = set()
     vis_nodes = []
     for n in merged_nodes.values():
@@ -561,12 +547,15 @@ def _build_vis_data(nodes, rels):
         safe_props = {}
         for k, v in props.items():
             safe_props[k] = str(v) if not isinstance(v, list) else ", ".join(str(x) for x in v)
-        vis_nodes.append({
+        node_data = {
             "id": n["id"], "label": display, "title": props.get("name", ""),
             "color": label_colors.get(label, "#999"), "group": label,
             "size": node_sizes.get(label, 15), "shape": node_shapes.get(label, "dot"),
             "properties": safe_props,
-        })
+        }
+        if n["id"] in levels:
+            node_data["level"] = levels[n["id"]]
+        vis_nodes.append(node_data)
 
     def edge_color(rel_type, noc_list):
         if rel_type == "OFFICER_OF": return "#00BCD4", 2.0
@@ -628,6 +617,46 @@ def _ensure_directors(d, company_number):
         print(f"Warning: director fetch failed: {e}", flush=True)
 
 
+def _ownership_query(company, direction="both"):
+    """Build the ownership tree Cypher query.
+    direction: 'up' = who controls this company, 'down' = what it controls, 'both' """
+    if direction == "both":
+        # Bidirectional: traverse HAS_SIGNIFICANT_CONTROL in both directions + IS_COMPANY
+        return (
+            f"MATCH (c:Company {{companyNumber: '{company}'}}) "
+            f"CALL apoc.path.expandConfig(c, {{"
+            f"  relationshipFilter: 'HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
+            f"  minLevel: 1, maxLevel: 30, "
+            f"  uniqueness: 'NODE_GLOBAL'"
+            f"}}) YIELD path RETURN path"
+        )
+    else:
+        # Upward only (who controls this company)
+        return (
+            f"MATCH (c:Company {{companyNumber: '{company}'}}) "
+            f"CALL apoc.path.expandConfig(c, {{"
+            f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
+            f"  minLevel: 1, maxLevel: 30, "
+            f"  uniqueness: 'NODE_GLOBAL'"
+            f"}}) YIELD path RETURN path"
+        )
+
+
+def _directors_query(company):
+    """Get directors for all companies in the ownership tree."""
+    return (
+        f"MATCH (c:Company {{companyNumber: '{company}'}}) "
+        f"CALL apoc.path.expandConfig(c, {{"
+        f"  relationshipFilter: 'HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
+        f"  minLevel: 0, maxLevel: 30, "
+        f"  uniqueness: 'NODE_GLOBAL'"
+        f"}}) YIELD path "
+        f"UNWIND nodes(path) AS n WITH n WHERE n:Company "
+        f"MATCH dirPath = (dd:Director)-[:OFFICER_OF]->(n) "
+        f"RETURN dirPath AS path"
+    )
+
+
 @app.route("/api/expand")
 def api_expand():
     """API endpoint: return graph data for a company's ownership tree as JSON.
@@ -650,26 +679,9 @@ def api_expand():
     if CH_API_KEY:
         _ensure_directors(d, company)
 
-    # Ownership tree
-    query = (
-        f"MATCH (c:Company {{companyNumber: '{company}'}}) "
-        f"CALL apoc.path.expandConfig(c, {{"
-        f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
-        f"  minLevel: 1, maxLevel: 30, "
-        f"  uniqueness: 'NODE_GLOBAL'"
-        f"}}) YIELD path RETURN path"
-    )
-    dir_query = (
-        f"MATCH (c:Company {{companyNumber: '{company}'}}) "
-        f"CALL apoc.path.expandConfig(c, {{"
-        f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
-        f"  minLevel: 0, maxLevel: 30, "
-        f"  uniqueness: 'NODE_GLOBAL'"
-        f"}}) YIELD path "
-        f"UNWIND nodes(path) AS n WITH n WHERE n:Company "
-        f"MATCH dirPath = (dd:Director)-[:OFFICER_OF]->(n) "
-        f"RETURN dirPath AS path"
-    )
+    # Ownership tree (bidirectional)
+    query = _ownership_query(company, "both")
+    dir_query = _directors_query(company)
 
     with d.session() as session:
         records = list(session.run(query))
@@ -679,86 +691,8 @@ def api_expand():
         return jsonify({"nodes": [], "edges": []})
 
     nodes, rels, _ = extract_graph_data(records)
-
-    # Build vis-compatible JSON
-    from search import export_html as _unused  # we just need the helper data
-    label_colors = {
-        "Company": "#4C8BF5", "Person": "#34A853", "CorporateEntity": "#FBBC04",
-        "LegalPerson": "#EA4335", "Director": "#00BCD4", "SICCode": "#9C27B0", "Address": "#607D8B",
-    }
-    node_sizes = {
-        "Company": 25, "Person": 15, "CorporateEntity": 20,
-        "LegalPerson": 18, "Director": 15, "SICCode": 12, "Address": 12,
-    }
-    node_shapes = {
-        "Company": "dot", "Person": "diamond", "CorporateEntity": "square",
-        "LegalPerson": "triangle", "Director": "triangleDown", "SICCode": "star", "Address": "hexagon",
-    }
-
-    # Merge CE->Company
-    ce_to_company = {}
-    for r in rels:
-        if r["type"] == "IS_COMPANY":
-            ce_id, co_id = r["startId"], r["endId"]
-            if ce_id in nodes and co_id in nodes:
-                if "CorporateEntity" in nodes[ce_id]["labels"] and "Company" in nodes[co_id]["labels"]:
-                    ce_to_company[ce_id] = co_id
-
-    merged_nodes = {nid: n for nid, n in nodes.items() if nid not in ce_to_company}
-    def remap(nid):
-        return ce_to_company.get(nid, nid)
-
-    merged_rels = []
-    for r in rels:
-        if r["type"] == "IS_COMPANY" and r["startId"] in ce_to_company:
-            continue
-        merged_rels.append({
-            "startId": remap(r["startId"]), "endId": remap(r["endId"]),
-            "type": r["type"], "properties": r["properties"],
-        })
-
-    seen_edges = set()
-    vis_nodes = []
-    for n in merged_nodes.values():
-        label = n["labels"][0] if n["labels"] else "Unknown"
-        props = n["properties"]
-        display = props.get("name", props.get("companyNumber", str(n["id"])))
-        if isinstance(display, str) and len(display) > 50:
-            display = display[:47] + "..."
-        cn = props.get("companyNumber", "")
-        if label == "Company" and cn:
-            display = f"{display}\n({cn})"
-
-        safe_props = {}
-        for k, v in props.items():
-            safe_props[k] = str(v) if not isinstance(v, list) else ", ".join(str(x) for x in v)
-
-        vis_nodes.append({
-            "id": n["id"], "label": display,
-            "color": label_colors.get(label, "#999"),
-            "group": label, "size": node_sizes.get(label, 15),
-            "shape": node_shapes.get(label, "dot"),
-            "properties": safe_props,
-        })
-
-    vis_edges = []
-    for r in merged_rels:
-        edge_key = (r["startId"], r["endId"], r["type"])
-        if edge_key in seen_edges:
-            continue
-        seen_edges.add(edge_key)
-        noc_raw = r["properties"].get("naturesOfControl", [])
-        if isinstance(noc_raw, list):
-            noc = ", ".join(str(x) for x in noc_raw)
-        else:
-            noc = str(noc_raw)
-        vis_edges.append({
-            "from": r["startId"], "to": r["endId"],
-            "label": r["type"].replace("HAS_SIGNIFICANT_CONTROL", "CONTROLS").replace("OFFICER_OF", "DIRECTOR").replace("_", " "),
-            "title": noc or r["type"], "arrows": "to",
-        })
-
-    return jsonify({"nodes": vis_nodes, "edges": vis_edges})
+    vis = _build_vis_data(nodes, rels)
+    return jsonify(vis)
 
 
 # ---------------------------------------------------------------------------
