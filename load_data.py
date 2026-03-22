@@ -367,8 +367,19 @@ def main():
     print(f"  Company CSV: {COMPANY_CSV}")
     print(f"  PSC JSONL:   {PSC_JSONL}")
 
-    process_companies(COMPANY_CSV, OUTPUT_DIR)
-    process_psc(PSC_JSONL, OUTPUT_DIR)
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    with ProcessPoolExecutor(max_workers=2) as pool:
+        futures = {
+            pool.submit(process_companies, COMPANY_CSV, OUTPUT_DIR): "Companies",
+            pool.submit(process_psc, PSC_JSONL, OUTPUT_DIR): "PSC",
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"\nError in {name}: {e}")
+                sys.exit(1)
 
     # Print the neo4j-admin import command
     print("\n" + "=" * 60)
