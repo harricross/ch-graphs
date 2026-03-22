@@ -551,7 +551,15 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       var remap = {};
 
       (d.nodes || []).forEach(function(n) {
-        if (!nodes.get(n.id)) {
+        // If node already exists, update it if the new version has extra styling (e.g. dual-role border)
+        var existing = nodes.get(n.id);
+        if (existing) {
+          if (n.borderWidth && !existing.borderWidth) {
+            nodes.update({ id: n.id, borderWidth: n.borderWidth, color: n.color });
+          }
+          return;
+        }
+        {
           var cn = (n.properties || {}).companyNumber || '';
 
           // Check if this Company already exists in the graph (different neo4j ID, same companyNumber)
@@ -636,6 +644,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           }
           nodes.add(n);
           added++;
+        }
         }
       });
       var existing = edges.get();
@@ -1274,27 +1283,50 @@ def api_expand():
 
     elif expand_type == "person":
         with d.session() as session:
-            records = list(session.run(
+            # Get companies this person controls/is officer of
+            person_records = list(session.run(
                 "MATCH (n) WHERE elementId(n) = $nid "
                 "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL|OFFICER_OF]->(c:Company) "
                 "RETURN path SKIP $skip LIMIT $lim",
                 nid=expand_id, skip=offset, lim=limit + 1,
             ))
-            if len(records) > limit:
-                records = records[:limit]
+            if len(person_records) > limit:
+                person_records = person_records[:limit]
                 has_more = True
+            records = list(person_records)
+
+            # Also get PSC data for each found company
+            company_numbers = set()
+            for rec in person_records:
+                for key in rec.keys():
+                    val = rec[key]
+                    if hasattr(val, 'nodes'):
+                        for node in val.nodes:
+                            if "Company" in node.labels:
+                                cn = node.get("companyNumber", "")
+                                if cn:
+                                    company_numbers.add(cn)
+            for cn in company_numbers:
+                tree_records = list(session.run(
+                    "MATCH (c:Company {companyNumber: $cn}) "
+                    "MATCH path = (psc)-[:HAS_SIGNIFICANT_CONTROL]->(c) "
+                    "RETURN path",
+                    cn=cn,
+                ))
+                records.extend(tree_records)
 
     elif expand_type == "corporate":
         with d.session() as session:
-            records = list(session.run(
+            corp_records = list(session.run(
                 "MATCH (n) WHERE elementId(n) = $nid "
                 "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL]->(c:Company) "
                 "RETURN path SKIP $skip LIMIT $lim",
                 nid=expand_id, skip=offset, lim=limit + 1,
             ))
-            if len(records) > limit:
-                records = records[:limit]
+            if len(corp_records) > limit:
+                corp_records = corp_records[:limit]
                 has_more = True
+            records = list(corp_records)
 
     elif expand_type == "directors":
         company = expand_id.upper()
