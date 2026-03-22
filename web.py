@@ -530,7 +530,14 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         }
       });
       updateStats();
-      if (added > 0) network.fit({ animation: true });
+      if (added > 0) {
+        // Auto-switch to force layout when graph gets large
+        if (hierarchical && nodes.length > 50) {
+          hierarchical = false;
+          network.setOptions(forceOpts);
+        }
+        network.fit({ animation: true });
+      }
     }
 
     function updateStats() {
@@ -644,8 +651,11 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     // Auto-resolve: keep expanding all unexpanded Company/CorporateEntity nodes
     var autoRunning = false;
     var expanded = {};
+    var AUTO_MAX_NODES = 200;
     function autoResolve() {
       if (autoRunning) { autoRunning = false; document.getElementById('autoBtn').textContent = 'Auto-resolve all'; return; }
+      // Switch to force layout for large auto-resolved graphs
+      if (hierarchical) { hierarchical = false; network.setOptions(forceOpts); }
       autoRunning = true;
       document.getElementById('autoBtn').textContent = 'Stop auto-resolve';
       autoStep();
@@ -653,6 +663,16 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     function autoStep() {
       if (!autoRunning) { document.getElementById('autoStatus').textContent = 'Stopped'; return; }
       var allNodes = nodes.get();
+
+      // Safety limit
+      if (allNodes.length >= AUTO_MAX_NODES) {
+        autoRunning = false;
+        document.getElementById('autoBtn').textContent = 'Auto-resolve all';
+        document.getElementById('autoStatus').textContent = 'Stopped — limit of ' + AUTO_MAX_NODES + ' nodes reached (' + allNodes.length + ' nodes)';
+        network.fit({ animation: true });
+        return;
+      }
+
       var target = null;
 
       // Phase 1: Find unexpanded Company or CorporateEntity nodes
