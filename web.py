@@ -458,6 +458,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         if (cn && node.group === 'Company') {
           h += '<button class="expand-btn" onclick="expandNode(&quot;company&quot;, &quot;' + escHtml(cn) + '&quot;)">Expand ownership tree</button>';
           h += '<button class="expand-btn" onclick="expandNode(&quot;directors&quot;, &quot;' + escHtml(cn) + '&quot;)">Load directors</button>';
+          h += '<button class="expand-btn" onclick="expandNode(&quot;subsidiaries&quot;, &quot;' + escHtml(cn) + '&quot;)">Find subsidiaries (PSC of)</button>';
           var pc = props.postcode || '';
           var addr = props.addressLine1 || '';
           if (pc) {
@@ -1528,17 +1529,11 @@ def _ownership_query(company, direction="both"):
 
 
 def _directors_query(company, include_former=False):
-    """Get directors for all companies in the ownership tree."""
+    """Get directors for the starting company and its direct parent/child companies."""
     where_clause = "" if include_former else "WHERE r.resignedOn IS NULL OR r.resignedOn = '' "
+    # Simple direct match — don't use APOC tree traversal for directors
     return (
-        f"MATCH (c:Company {{companyNumber: '{company}'}}) "
-        f"CALL apoc.path.expandConfig(c, {{"
-        f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY>', "
-        f"  minLevel: 0, maxLevel: 30, "
-        f"  uniqueness: 'NODE_GLOBAL'"
-        f"}}) YIELD path "
-        f"UNWIND nodes(path) AS n WITH n WHERE n:Company "
-        f"MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(n) "
+        f"MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(c:Company {{companyNumber: '{company}'}}) "
         f"{where_clause}"
         f"RETURN dirPath AS path"
     )
@@ -1724,6 +1719,30 @@ def api_expand():
                 "RETURN c SKIP $skip LIMIT $lim",
                 pc=postcode, skip=offset, lim=limit + 1,
             ))
+            if len(records) > limit:
+                records = records[:limit]
+                has_more = True
+
+    elif expand_type == "subsidiaries":
+        # Find companies where this company is a PSC (via CorporateEntity with matching registration number)
+        company = expand_id.upper()
+        with d.session() as session:
+            # Find CorporateEntities whose registration number matches this company
+            records = list(session.run(
+                "MATCH (ce:CorporateEntity)-[:IS_COMPANY]->(c:Company {companyNumber: $cn}) "
+                "MATCH path = (ce)-[:HAS_SIGNIFICANT_CONTROL]->(subsidiary:Company) "
+                "RETURN path SKIP $skip LIMIT $lim",
+                cn=company, skip=offset, lim=limit + 1,
+            ))
+            if not records:
+                # Also try matching by name (for CEs without IS_COMPANY link)
+                records = list(session.run(
+                    "MATCH (c:Company {companyNumber: $cn}) "
+                    "MATCH (ce:CorporateEntity) WHERE ce.registrationNumber = $cn "
+                    "MATCH path = (ce)-[:HAS_SIGNIFICANT_CONTROL]->(subsidiary:Company) "
+                    "RETURN path SKIP $skip LIMIT $lim",
+                    cn=company, skip=offset, lim=limit + 1,
+                ))
             if len(records) > limit:
                 records = records[:limit]
                 has_more = True
