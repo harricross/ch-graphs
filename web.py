@@ -637,7 +637,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         if (!source) return;
         var target = e.to;
         if (!companyLinks[target]) companyLinks[target] = { persons: [], directors: [] };
-        var name = ((source.properties || {}).name || '').toUpperCase().replace(/\s+/g, ' ').trim();
+        var name = ((source.properties || {}).name || '').toUpperCase().replace(/\\s+/g, ' ').trim();
         if (!name) return;
         if (source.group === 'Person') companyLinks[target].persons.push({ id: source.id, name: name });
         if (source.group === 'Director') companyLinks[target].directors.push({ id: source.id, name: name });
