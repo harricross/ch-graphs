@@ -378,7 +378,45 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
 
     function mergeData(d) {
       var added = 0;
-      (d.nodes || []).forEach(function(n) { if (!nodes.get(n.id)) { nodes.add(n); added++; } });
+      // Check if existing nodes use levels
+      var hasLevels = nodes.get().some(function(n) { return n.level !== undefined; });
+
+      (d.nodes || []).forEach(function(n) {
+        if (!nodes.get(n.id)) {
+          // If existing graph uses levels but this node doesn't have one, assign one
+          if (hasLevels && n.level === undefined) {
+            // Find a connected edge to determine level relative to a known node
+            var parentLevel = null;
+            (d.edges || []).forEach(function(e) {
+              if (e.from === n.id) {
+                var target = nodes.get(e.to);
+                if (target && target.level !== undefined) parentLevel = target.level - 1;
+              }
+              if (e.to === n.id) {
+                var source = nodes.get(e.from);
+                if (source && source.level !== undefined) parentLevel = source.level + 1;
+              }
+            });
+            if (parentLevel === null) {
+              // Check existing edges too
+              edges.get().forEach(function(e) {
+                if (e.from === n.id) {
+                  var target = nodes.get(e.to);
+                  if (target && target.level !== undefined) parentLevel = target.level - 1;
+                }
+                if (e.to === n.id) {
+                  var source = nodes.get(e.from);
+                  if (source && source.level !== undefined) parentLevel = source.level + 1;
+                }
+              });
+            }
+            if (parentLevel !== null) n.level = parentLevel;
+            else n.level = 0;  // fallback
+          }
+          nodes.add(n);
+          added++;
+        }
+      });
       var existing = edges.get();
       (d.edges || []).forEach(function(e) {
         var dup = existing.some(function(ex) { return ex.from === e.from && ex.to === e.to && ex.label === e.label; });
