@@ -252,7 +252,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
 <body>
   <div id="controls">
     <a class="back" href="/">← Back to search</a>
-    <h3 style="margin-top: 6px;">{{ company }}</h3>
+    <h3 style="margin-top: 6px; cursor: pointer;" onclick="focusRoot()" id="title">{{ company }}</h3>
     <div id="stats">Loading...</div>
     <div id="status"><span class="spinner-sm"></span> Querying ownership tree...</div>
     <div class="legend">
@@ -535,7 +535,24 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
 
     function updateStats() {
       document.getElementById('stats').textContent = nodes.length + ' nodes, ' + edges.length + ' edges';
+      // Track root node
+      if (!rootNodeId) {
+        var allN = nodes.get();
+        for (var i = 0; i < allN.length; i++) {
+          if (allN[i].group === 'Company' && (allN[i].properties || {}).companyNumber === '{{ company }}') {
+            rootNodeId = allN[i].id;
+            break;
+          }
+        }
+      }
       detectDualRoles();
+    }
+
+    function focusRoot() {
+      if (rootNodeId) {
+        network.focus(rootNodeId, { scale: 1.2, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
+        network.selectNodes([rootNodeId]);
+      }
     }
 
     function detectDualRoles() {
@@ -599,7 +616,16 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     var showFormer = urlParams.get('former') === '1';
     var streamUrl = '/api/stream?company={{ company }}' + (showFormer ? '&former=1' : '');
     var evtSource = new EventSource(streamUrl);
-    evtSource.addEventListener('status', function(e) { setStatus(e.data); });
+    var rootNodeId = null;
+    evtSource.addEventListener('status', function(e) {
+      setStatus(e.data);
+      // Capture company name from "Found: COMPANY NAME" status
+      if (e.data.indexOf('Found: ') === 0) {
+        var name = e.data.substring(7);
+        document.getElementById('title').textContent = name + ' (' + '{{ company }}' + ')';
+        document.title = name + ' — CH Graphs';
+      }
+    });
     evtSource.addEventListener('data', function(e) {
       var d = JSON.parse(e.data);
       mergeData(d);
