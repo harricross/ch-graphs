@@ -8,10 +8,20 @@ services:
     environment:
       - NEO4J_AUTH=neo4j/companies2026
       - NEO4J_PLUGINS=["apoc"]
-      # Memory
+      # Memory (tuned for 16GB server)
       - NEO4J_server_memory_heap_initial__size=4g
       - NEO4J_server_memory_heap_max__size=6g
       - NEO4J_server_memory_pagecache_size=4g
+      # Page cache warmup (preload store files on startup)
+      - NEO4J_db_memory_pagecache_warmup_preload=true
+      # Checkpoint tuning (reduce I/O during writes)
+      - NEO4J_db_checkpoint_interval_time=15m
+      - NEO4J_db_checkpoint_interval_tx=100000
+      # TX log tuning
+      - NEO4J_db_tx__log_rotation_size=256m
+      - NEO4J_db_tx__log_preallocate=true
+      # Query cache
+      - NEO4J_server_memory_query__cache_per__db__cache__num__entries=2000
       # APOC
       - NEO4J_apoc_export_file_enabled=true
       - NEO4J_apoc_import_file_enabled=true
