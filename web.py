@@ -1284,24 +1284,28 @@ def _compute_positions(vis_nodes, vis_edges):
     if not level_companies:
         return
 
-    # Layout companies: spread horizontally per level, levels go top to bottom
+    # Layout companies: wrap into grid per level, levels go top to bottom
     X_SPACING = 400
     Y_SPACING = 350
     SATELLITE_RADIUS = 180
+    MAX_PER_ROW = 5  # max companies per row before wrapping
 
     sorted_levels = sorted(level_companies.keys())
     company_positions = {}  # company_id -> (x, y)
 
+    y_offset = 0
     for lvl in sorted_levels:
         companies = level_companies[lvl]
-        y = lvl * Y_SPACING
-        total_width = (len(companies) - 1) * X_SPACING
-        start_x = -total_width / 2
-        for i, cid in enumerate(companies):
-            x = start_x + i * X_SPACING
-            company_positions[cid] = (x, y)
-            node_by_id[cid]["x"] = x
-            node_by_id[cid]["y"] = y
+        rows = [companies[i:i+MAX_PER_ROW] for i in range(0, len(companies), MAX_PER_ROW)]
+        for row in rows:
+            total_width = (len(row) - 1) * X_SPACING
+            start_x = -total_width / 2
+            for i, cid in enumerate(row):
+                x = start_x + i * X_SPACING
+                company_positions[cid] = (x, y_offset)
+                node_by_id[cid]["x"] = x
+                node_by_id[cid]["y"] = y_offset
+            y_offset += Y_SPACING
 
     # Layout satellite nodes (Directors, Persons, etc.) around their company
     company_satellites = {}  # company_id -> [node_id]
