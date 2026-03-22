@@ -52,21 +52,36 @@ def get_driver():
 
 
 def _fix_is_company_links(d):
-    """Create missing IS_COMPANY rels where registration_number needs zero-padding."""
+    """Create missing IS_COMPANY rels where registration_number needs zero-padding.
+
+    Uses APOC periodic.iterate for batched execution to avoid long-running
+    single transactions.  Only needed for databases imported before the
+    load_data.py zero-padding fix.
+    """
     with d.session() as s:
+        # First ensure an index exists for the scan
+        s.run("CREATE INDEX ce_reg IF NOT EXISTS FOR (ce:CorporateEntity) ON (ce.registrationNumber)")
         result = s.run("""
-            MATCH (ce:CorporateEntity)
-            WHERE ce.registrationNumber IS NOT NULL
-              AND NOT (ce)-[:IS_COMPANY]->(:Company)
-              AND ce.registrationNumber =~ '^[0-9]+$'
-            WITH ce, right('00000000' + ce.registrationNumber, 8) AS padded
-            MATCH (co:Company {companyNumber: padded})
-            MERGE (ce)-[:IS_COMPANY]->(co)
-            RETURN count(*) AS fixed
+            CALL apoc.periodic.iterate(
+              'MATCH (ce:CorporateEntity)
+               WHERE ce.registrationNumber IS NOT NULL
+                 AND size(ce.registrationNumber) < 8
+                 AND NOT (ce)-[:IS_COMPANY]->(:Company)
+               WITH ce, right("00000000" + ce.registrationNumber, 8) AS padded
+               RETURN ce, padded',
+              'WITH ce, padded
+               MATCH (co:Company {companyNumber: padded})
+               MERGE (ce)-[:IS_COMPANY]->(co)',
+              {batchSize: 500, parallel: false}
+            ) YIELD batches, total, errorMessages
+            RETURN total, errorMessages
         """)
-        n = result.single()["fixed"]
+        rec = result.single()
+        n = rec["total"]
         if n:
-            print(f"[startup] Fixed {n} IS_COMPANY links via zero-padding")
+            errs = rec["errorMessages"]
+            print(f"[startup] Fixed {n} IS_COMPANY links via zero-padding"
+                  + (f" (errors: {errs})" if errs else ""))
 
 
 # ---------------------------------------------------------------------------
