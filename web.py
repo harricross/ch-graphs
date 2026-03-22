@@ -1029,6 +1029,19 @@ def api_expand():
         with d.session() as session:
             records = list(session.run(query))
             records.extend(list(session.run(dir_query)))
+            # Also get direct incoming/outgoing PSC edges so the node connects
+            # to existing graph when expanded from another company
+            records.extend(list(session.run(
+                "MATCH path = (psc)-[:HAS_SIGNIFICANT_CONTROL]->(c:Company {companyNumber: $cn}) "
+                "RETURN path",
+                cn=company,
+            )))
+            records.extend(list(session.run(
+                "MATCH (c:Company {companyNumber: $cn})<-[:IS_COMPANY]-(ce:CorporateEntity) "
+                "MATCH path = (ce)-[:HAS_SIGNIFICANT_CONTROL]->(target:Company) "
+                "RETURN path",
+                cn=company,
+            )))
 
     elif expand_type == "person":
         with d.session() as session:
