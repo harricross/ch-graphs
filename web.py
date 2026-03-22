@@ -640,7 +640,7 @@ def api_stream():
 
             if not dir_records:
                 # Fallback for single company
-                resigned_filter = "" if include_former else "WHERE r.resignedOn IS NULL "
+                resigned_filter = "" if include_former else "WHERE r.resignedOn IS NULL OR r.resignedOn = '' "
                 with d.session() as session:
                     dir_records = list(session.run(
                         f"MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(c:Company {{companyNumber: $cn}}) "
@@ -822,7 +822,7 @@ def _ownership_query(company, direction="both"):
 
 def _directors_query(company, include_former=False):
     """Get directors for all companies in the ownership tree."""
-    where_clause = "" if include_former else "WHERE r.resignedOn IS NULL "
+    where_clause = "" if include_former else "WHERE r.resignedOn IS NULL OR r.resignedOn = '' "
     return (
         f"MATCH (c:Company {{companyNumber: '{company}'}}) "
         f"CALL apoc.path.expandConfig(c, {{"
@@ -898,11 +898,24 @@ def api_expand():
     elif expand_type == "directors":
         company = expand_id.upper()
         if CH_API_KEY:
-            _ensure_directors(d, company)
+            # Direct fetch for this specific company (not tree-based)
+            from fetch_directors import fetch_officers as _fetch, load_officers_to_neo4j as _load, get_fetch_metadata as _meta, needs_refresh as _needs
+            meta = _meta(d, [company])
+            m = meta.get(company, {"fetchedAt": None, "etag": None})
+            if _needs(m["fetchedAt"]):
+                print(f"  [directors] Fetching officers for {company}...", flush=True)
+                officers, new_etag, modified = _fetch(CH_API_KEY, company, etag=m.get("etag"))
+                if modified and officers:
+                    _load(d, company, officers, etag=new_etag)
+                    print(f"  [directors] Loaded {len(officers)} officers for {company}", flush=True)
+                elif not modified:
+                    from fetch_directors import STAMP_FETCH_QUERY as _stamp
+                    with d.session() as session:
+                        session.run(_stamp, cn=company, etag=m.get("etag") or "")
         with d.session() as session:
             records = list(session.run(
                 "MATCH dirPath = (dd:Director)-[r:OFFICER_OF]->(c:Company {companyNumber: $cn}) "
-                "WHERE r.resignedOn IS NULL "
+                "WHERE r.resignedOn IS NULL OR r.resignedOn = '' "
                 "RETURN dirPath AS path",
                 cn=company,
             ))
