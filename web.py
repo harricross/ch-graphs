@@ -367,7 +367,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         var name = (n.properties || {}).name || (n.properties || {}).companyNumber || n.label || '?';
         if (name.length > 30) name = name.substring(0, 27) + '...';
         var color = n.color.background || n.color || '#999';
-        html += '<span style="cursor:pointer; color:' + color + ';" onclick="network.focus(\'' + nid + '\', {scale:1.2, animation:true}); network.selectNodes([\'' + nid + '\'])">';
+        html += '<span style="cursor:pointer; color:' + color + ';" onclick="focusNode(&quot;' + nid + '&quot;)">';
         html += escHtml(name);
         html += '</span>';
         if (idx < path.length - 1) html += ' <span style="color:#555;">→</span> ';
@@ -619,10 +619,12 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     }
 
     function focusRoot() {
-      if (rootNodeId) {
-        network.focus(rootNodeId, { scale: 1.2, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
-        network.selectNodes([rootNodeId]);
-      }
+      if (rootNodeId) focusNode(rootNodeId);
+    }
+
+    function focusNode(nid) {
+      network.focus(nid, { scale: 1.2, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
+      network.selectNodes([nid]);
     }
 
     function detectDualRoles() {
