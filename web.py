@@ -430,12 +430,25 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         }
       });
 
+      // Map entityId -> existing CorporateEntity/Person node ID for dedup
+      var entityToNodeId = {};
+      nodes.get().forEach(function(n) {
+        var eid = (n.properties || {}).entityId || (n.properties || {}).personId || '';
+        if (eid) entityToNodeId[eid] = n.id;
+      });
+
       // Remap table: new node ID -> existing node ID (for merging)
       var remap = {};
 
       (d.nodes || []).forEach(function(n) {
         if (!nodes.get(n.id)) {
           var cn = (n.properties || {}).companyNumber || '';
+
+          // Check if this Company already exists in the graph (different neo4j ID, same companyNumber)
+          if (n.group === 'Company' && cn && cnToNodeId[cn]) {
+            remap[n.id] = cnToNodeId[cn];
+            return;  // skip duplicate company
+          }
 
           // Check if this new Company node matches an existing CorporateEntity
           if (n.group === 'Company' && cn && regNumToNodeId[cn]) {
@@ -463,6 +476,14 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
               return;
             }
           }
+
+          // Check if this entity (Person/CorporateEntity) already exists by entityId/personId
+          var eid = (n.properties || {}).entityId || (n.properties || {}).personId || '';
+          if (eid && entityToNodeId[eid]) {
+            remap[n.id] = entityToNodeId[eid];
+            return;
+          }
+
           // If existing graph uses levels but this node doesn't have one, assign one
           if (hasLevels && n.level === undefined) {
             // Find a connected edge to determine level relative to a known node
