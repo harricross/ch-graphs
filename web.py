@@ -646,7 +646,6 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           }
         }
       }
-      detectDualRoles();
     }
 
     function focusRoot() {
@@ -656,94 +655,6 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     function focusNode(nid) {
       network.focus(nid, { scale: 1.2, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
       network.selectNodes([nid]);
-    }
-
-    function detectDualRoles() {
-      // Merge Person and Director nodes that represent the same person on the same company.
-      // Match by surname + forename to avoid false merges of different people with same surname.
-      var allNodes = nodes.get();
-      var allEdges = edges.get();
-
-      // Build map: companyId -> { persons: [...], directors: [...] }
-      var companyLinks = {};
-      allEdges.forEach(function(e) {
-        var source = nodes.get(e.from);
-        if (!source) return;
-        if (!companyLinks[e.to]) companyLinks[e.to] = { persons: [], directors: [] };
-        if (source.group === 'Person') companyLinks[e.to].persons.push(source);
-        if (source.group === 'Director') companyLinks[e.to].directors.push(source);
-      });
-
-      function normName(s) { return (s || '').toUpperCase().replace(/[^A-Z ]/g, '').trim(); }
-
-      // Extract forename+surname from Person (props: forename, surname)
-      // and Director (name format: "SURNAME, Forename Middle")
-      function personKey(p) {
-        var props = p.properties || {};
-        var fn = normName(props.forename || '');
-        var sn = normName(props.surname || '');
-        if (fn && sn) return sn + '|' + fn;
-        // Fallback: parse full name — "Mr John Smith" -> SMITH|JOHN
-        var parts = normName(props.name || '').split(' ').filter(function(x) { return x; });
-        // Remove titles
-        var titles = ['MR','MRS','MS','MISS','DR','SIR','DAME','LORD','LADY','PROF','PROFESSOR'];
-        if (parts.length > 1 && titles.indexOf(parts[0]) >= 0) parts.shift();
-        if (parts.length >= 2) return parts[parts.length - 1] + '|' + parts[0];
-        return normName(props.name || '');
-      }
-      function directorKey(d) {
-        var name = normName((d.properties || {}).name || '');
-        // Director names: "SURNAME, Forename Middle"
-        var comma = name.indexOf(',');
-        if (comma > 0) {
-          var sn = name.substring(0, comma).trim();
-          var rest = name.substring(comma + 1).trim().split(' ');
-          var fn = rest[0] || '';
-          return sn + '|' + fn;
-        }
-        var parts = name.split(' ').filter(function(x) { return x; });
-        if (parts.length >= 2) return parts[parts.length - 1] + '|' + parts[0];
-        return name;
-      }
-
-      // Find matching pairs per company
-      var merged = {};  // director.id -> person.id (director merges into person)
-      Object.values(companyLinks).forEach(function(cl) {
-        cl.persons.forEach(function(p) {
-          var pk = personKey(p);
-          if (!pk) return;
-          cl.directors.forEach(function(d) {
-            if (merged[d.id]) return;  // already merged
-            var dk = directorKey(d);
-            if (pk === dk) {
-              merged[d.id] = p.id;
-            }
-          });
-        });
-      });
-
-      // Apply merges: move director edges to the person node, remove director node
-      Object.keys(merged).forEach(function(dirId) {
-        var personId = merged[dirId];
-        // Rewire edges from director to person
-        allEdges.forEach(function(e) {
-          if (e.from === dirId) {
-            edges.update({ id: e.id, from: personId });
-          }
-        });
-        // Remove the director node
-        try { nodes.remove(dirId); } catch(ex) {}
-        // Mark the person node as dual-role
-        var pn = nodes.get(personId);
-        if (pn && !pn._dualMarked) {
-          nodes.update({
-            id: personId,
-            borderWidth: 4,
-            color: { border: '#FF6600', background: pn.color.background || pn.color },
-            _dualMarked: true
-          });
-        }
-      });
     }
 
     function setStatus(msg, cls) {
@@ -923,19 +834,20 @@ def api_stream():
                 return
         yield send("status", f"Found: {record['name']}")
 
-        # 2. Ownership tree (bidirectional — up and down the chain)
+        all_records = []
+
+        # 2. Ownership tree — send immediately so graph appears fast
         yield send("status", "Querying ownership tree...")
         query = _ownership_query(company, "both")
         with d.session() as session:
             records = list(session.run(query))
-
         if records:
+            all_records.extend(records)
             nodes_data, rels_data, _ = extract_graph_data(records)
             vis = _build_vis_data(nodes_data, rels_data)
             yield send("data", _json.dumps(vis, default=str))
             yield send("status", f"Ownership tree: {len(vis['nodes'])} nodes")
         else:
-            # Fallback: direct PSCs
             yield send("status", "No ownership chain — loading direct PSCs...")
             with d.session() as session:
                 fallback = list(session.run(
@@ -943,6 +855,7 @@ def api_stream():
                     "OPTIONAL MATCH path1 = (psc)-[:HAS_SIGNIFICANT_CONTROL]->(c) "
                     "RETURN c, path1", cn=company
                 ))
+            all_records.extend(fallback)
             if fallback:
                 nodes_data, rels_data, _ = extract_graph_data(fallback)
                 vis = _build_vis_data(nodes_data, rels_data)
@@ -956,14 +869,12 @@ def api_stream():
             except Exception as e:
                 yield send("status", f"Director fetch warning: {e}")
 
-            # 4. Query directors
+            # 4. Query directors and merge with ownership data
             yield send("status", "Loading directors...")
             dir_query = _directors_query(company, include_former=include_former)
             with d.session() as session:
                 dir_records = list(session.run(dir_query))
-
             if not dir_records:
-                # Fallback for single company
                 resigned_filter = "" if include_former else "WHERE r.resignedOn IS NULL OR r.resignedOn = '' "
                 with d.session() as session:
                     dir_records = list(session.run(
@@ -973,20 +884,19 @@ def api_stream():
                     ))
 
             if dir_records:
-                nodes_data, rels_data, _ = extract_graph_data(dir_records)
-                vis = _build_vis_data(nodes_data, rels_data)
-                # Send in chunks to avoid huge SSE payloads
-                chunk_size = 50
-                all_nodes = vis.get("nodes", [])
-                all_edges = vis.get("edges", [])
-                for i in range(0, max(len(all_nodes), len(all_edges)), chunk_size):
-                    chunk = {
-                        "nodes": all_nodes[i:i+chunk_size],
-                        "edges": all_edges[i:i+chunk_size],
-                    }
+                # Combine ALL records (ownership + directors) for proper merge
+                all_records.extend(dir_records)
+                all_nodes, all_rels, _ = extract_graph_data(all_records)
+                vis = _build_vis_data(all_nodes, all_rels)
+                # Send as chunks
+                chunk_size = 100
+                vn = vis.get("nodes", [])
+                ve = vis.get("edges", [])
+                for i in range(0, max(len(vn), len(ve)), chunk_size):
+                    chunk = {"nodes": vn[i:i+chunk_size], "edges": ve[i:i+chunk_size]}
                     if chunk["nodes"] or chunk["edges"]:
                         yield send("data", _json.dumps(chunk, default=str))
-                yield send("status", f"Loaded {len(all_nodes)} directors")
+                yield send("status", f"{len(vn)} nodes, {len(ve)} edges (merged)")
 
         yield send("done", "Complete")
 
@@ -1032,6 +942,76 @@ def _build_vis_data(nodes, rels):
         merged_rels.append({"startId": remap(r["startId"]), "endId": remap(r["endId"]),
                             "type": r["type"], "properties": r["properties"]})
 
+    # Merge Person + Director nodes (same person, different data sources)
+    def _norm_name(s):
+        return "".join(c for c in (s or "").upper() if c.isalpha() or c == " ").strip()
+
+    def _person_key(n):
+        p = n["properties"]
+        fn = _norm_name(p.get("forename", ""))
+        sn = _norm_name(p.get("surname", ""))
+        if fn and sn:
+            return sn + "|" + fn
+        name = _norm_name(p.get("name", ""))
+        parts = name.split()
+        titles = {"MR", "MRS", "MS", "MISS", "DR", "SIR", "DAME", "LORD", "LADY", "PROF"}
+        if len(parts) > 1 and parts[0] in titles:
+            parts = parts[1:]
+        if len(parts) >= 2:
+            return parts[-1] + "|" + parts[0]
+        return name
+
+    def _director_key(n):
+        name = _norm_name(n["properties"].get("name", ""))
+        if "," in name:
+            parts = name.split(",", 1)
+            sn = parts[0].strip()
+            fn = parts[1].strip().split()[0] if parts[1].strip() else ""
+            return sn + "|" + fn
+        parts = name.split()
+        if len(parts) >= 2:
+            return parts[-1] + "|" + parts[0]
+        return name
+
+    # Build per-company person/director lists
+    company_persons = {}  # company_id -> [(node_id, key)]
+    company_directors = {}
+    for r in merged_rels:
+        src = r["startId"]
+        dst = r["endId"]
+        if src in merged_nodes:
+            n = merged_nodes[src]
+            if "Person" in n["labels"] and r["type"] == "HAS_SIGNIFICANT_CONTROL":
+                company_persons.setdefault(dst, []).append((src, _person_key(n)))
+            if "Director" in n["labels"] and r["type"] == "OFFICER_OF":
+                company_directors.setdefault(dst, []).append((src, _director_key(n)))
+
+    dir_to_person = {}  # director_id -> person_id
+    for co_id in company_persons:
+        if co_id not in company_directors:
+            continue
+        for p_id, pk in company_persons[co_id]:
+            if not pk:
+                continue
+            for d_id, dk in company_directors[co_id]:
+                if d_id in dir_to_person:
+                    continue
+                if pk == dk:
+                    dir_to_person[d_id] = p_id
+
+    # Apply Person/Director merge: rewire director edges to person, remove director nodes
+    if dir_to_person:
+        new_rels = []
+        for r in merged_rels:
+            src = dir_to_person.get(r["startId"], r["startId"])
+            new_rels.append({"startId": src, "endId": r["endId"],
+                             "type": r["type"], "properties": r["properties"]})
+        merged_rels = new_rels
+        for d_id in dir_to_person:
+            merged_nodes.pop(d_id, None)
+        # Mark merged persons as dual-role
+        dual_person_ids = set(dir_to_person.values())
+
     # Compute hierarchy levels
     levels = _compute_levels(merged_nodes, merged_rels)
 
@@ -1045,7 +1025,7 @@ def _build_vis_data(nodes, rels):
             display = display[:27] + "..."
         cn = props.get("companyNumber", "")
         if label == "Company" and cn:
-            display = f"{display}\n({cn})"
+            display = f"{display} ({cn})"
         safe_props = {}
         for k, v in props.items():
             safe_props[k] = str(v) if not isinstance(v, list) else ", ".join(str(x) for x in v)
@@ -1057,6 +1037,9 @@ def _build_vis_data(nodes, rels):
         }
         if n["id"] in levels:
             node_data["level"] = levels[n["id"]]
+        if dir_to_person and n["id"] in dual_person_ids:
+            node_data["borderWidth"] = 4
+            node_data["color"] = {"border": "#FF6600", "background": label_colors.get(label, "#999")}
         vis_nodes.append(node_data)
 
     def edge_color(rel_type, props):
