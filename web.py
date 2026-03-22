@@ -559,12 +559,14 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       var remap = {};
 
       (d.nodes || []).forEach(function(n) {
-        // If node already exists, update it if the new version has extra styling (e.g. dual-role border)
+        // If node already exists, update it with any new properties
         var existing = nodes.get(n.id);
         if (existing) {
-          if (n.borderWidth && !existing.borderWidth) {
-            nodes.update({ id: n.id, borderWidth: n.borderWidth, color: n.color });
-          }
+          var updates = { id: n.id };
+          var needsUpdate = false;
+          if (n.borderWidth && !existing.borderWidth) { updates.borderWidth = n.borderWidth; updates.color = n.color; needsUpdate = true; }
+          if (n.level !== undefined && existing.level === undefined) { updates.level = n.level; needsUpdate = true; }
+          if (needsUpdate) nodes.update(updates);
           return;
         }
         var cn = (n.properties || {}).companyNumber || '';
