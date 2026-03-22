@@ -430,7 +430,8 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           }
         }
         if (node.group === 'Person' || node.group === 'Director') {
-          h += '<button class="expand-btn" onclick="expandNode(&quot;person&quot;, &quot;' + escHtml(nodeId) + '&quot;)">Find all companies</button>';
+          var personName = (props.name || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+          h += '<button class="expand-btn" onclick="expandNode(&quot;person&quot;, &quot;' + escHtml(nodeId) + '&quot;, 0, &quot;' + personName + '&quot;)">Find all companies</button>';
         }
         if (node.group === 'CorporateEntity') {
           var regNum = props.registrationNumber || '';
@@ -546,7 +547,9 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         var node = nodes.get(params.nodes[0]);
         var cn = (node.properties || {}).companyNumber;
         if (cn && node.group === 'Company') expandNode('company', cn);
-        else if (node.group === 'Person' || node.group === 'Director') expandNode('person', params.nodes[0]);
+        else if (node.group === 'Person' || node.group === 'Director') {
+          expandNode('person', params.nodes[0], 0, (node.properties || {}).name);
+        }
         else if (node.group === 'CorporateEntity') {
           var regNum = (node.properties || {}).registrationNumber;
           if (regNum) expandNode('company', regNum);
@@ -555,13 +558,14 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     });
 
     var expanding = {};
-    function expandNode(type, id, offset) {
+    function expandNode(type, id, offset, name) {
       var key = type + ':' + id;
       if (expanding[key]) return;
       expanding[key] = true;
       setStatus('Expanding...');
       var url = '/api/expand?type=' + encodeURIComponent(type) + '&id=' + encodeURIComponent(id);
       if (offset) url += '&offset=' + offset;
+      if (name) url += '&name=' + encodeURIComponent(name);
       fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(d) {
@@ -1556,37 +1560,42 @@ def api_expand():
             )))
 
     elif expand_type == "person":
+        person_name = request.args.get("name", "").strip()
         with d.session() as session:
-            # Get companies this person controls/is officer of
-            person_records = list(session.run(
-                "MATCH (n) WHERE elementId(n) = $nid "
-                "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL|OFFICER_OF]->(c:Company) "
-                "RETURN path SKIP $skip LIMIT $lim",
-                nid=expand_id, skip=offset, lim=limit + 1,
-            ))
-
-            # If no results (possibly deduped node), try matching Director by name
-            if not person_records:
-                # Get the node's name from Neo4j
+            # Try by name first (covers all deduped Director/Person nodes)
+            if not person_name:
+                # Get name from Neo4j if not provided
                 name_result = session.run(
                     "MATCH (n) WHERE elementId(n) = $nid RETURN n.name AS name", nid=expand_id
                 )
                 name_rec = name_result.single()
-                if name_rec and name_rec["name"]:
-                    name = name_rec["name"]
-                    person_records = list(session.run(
-                        "MATCH (n:Director) WHERE n.name = $name "
-                        "MATCH path = (n)-[:OFFICER_OF]->(c:Company) "
-                        "RETURN path LIMIT $lim",
-                        name=name, lim=limit,
-                    ))
-                    # Also try Person
-                    person_records.extend(list(session.run(
-                        "MATCH (n:Person) WHERE n.name = $name "
-                        "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL]->(c:Company) "
-                        "RETURN path LIMIT $lim",
-                        name=name, lim=limit,
-                    )))
+                person_name = name_rec["name"] if name_rec else ""
+
+            person_records = []
+            if person_name:
+                # Find all Director appointments with this name
+                person_records.extend(list(session.run(
+                    "MATCH (n:Director) WHERE n.name = $name "
+                    "MATCH path = (n)-[:OFFICER_OF]->(c:Company) "
+                    "RETURN path LIMIT $lim",
+                    name=person_name, lim=limit,
+                )))
+                # Find all Person PSC records with this name
+                person_records.extend(list(session.run(
+                    "MATCH (n:Person) WHERE n.name = $name "
+                    "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL]->(c:Company) "
+                    "RETURN path LIMIT $lim",
+                    name=person_name, lim=limit,
+                )))
+
+            # Also try elementId direct lookup
+            if not person_records:
+                person_records = list(session.run(
+                    "MATCH (n) WHERE elementId(n) = $nid "
+                    "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL|OFFICER_OF]->(c:Company) "
+                    "RETURN path LIMIT $lim",
+                    nid=expand_id, lim=limit,
+                ))
             if len(person_records) > limit:
                 person_records = person_records[:limit]
                 has_more = True
