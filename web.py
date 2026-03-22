@@ -659,49 +659,87 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     }
 
     function detectDualRoles() {
-      // Find nodes that are both a PSC and a Director (by name match on same company)
+      // Merge Person and Director nodes that represent the same person on the same company.
+      // Match by surname + forename to avoid false merges of different people with same surname.
       var allNodes = nodes.get();
       var allEdges = edges.get();
 
-      // Build map: companyId -> { persons: [{id, name}], directors: [{id, name}] }
+      // Build map: companyId -> { persons: [...], directors: [...] }
       var companyLinks = {};
       allEdges.forEach(function(e) {
         var source = nodes.get(e.from);
         if (!source) return;
-        var target = e.to;
-        if (!companyLinks[target]) companyLinks[target] = { persons: [], directors: [] };
-        var name = ((source.properties || {}).name || '').toUpperCase().replace(/\\s+/g, ' ').trim();
-        if (!name) return;
-        if (source.group === 'Person') companyLinks[target].persons.push({ id: source.id, name: name });
-        if (source.group === 'Director') companyLinks[target].directors.push({ id: source.id, name: name });
+        if (!companyLinks[e.to]) companyLinks[e.to] = { persons: [], directors: [] };
+        if (source.group === 'Person') companyLinks[e.to].persons.push(source);
+        if (source.group === 'Director') companyLinks[e.to].directors.push(source);
       });
 
-      // Find matches
-      var dualIds = {};
+      function normName(s) { return (s || '').toUpperCase().replace(/[^A-Z ]/g, '').trim(); }
+
+      // Extract forename+surname from Person (props: forename, surname)
+      // and Director (name format: "SURNAME, Forename Middle")
+      function personKey(p) {
+        var props = p.properties || {};
+        var fn = normName(props.forename || '');
+        var sn = normName(props.surname || '');
+        if (fn && sn) return sn + '|' + fn;
+        // Fallback: parse full name — "Mr John Smith" -> SMITH|JOHN
+        var parts = normName(props.name || '').split(' ').filter(function(x) { return x; });
+        // Remove titles
+        var titles = ['MR','MRS','MS','MISS','DR','SIR','DAME','LORD','LADY','PROF','PROFESSOR'];
+        if (parts.length > 1 && titles.indexOf(parts[0]) >= 0) parts.shift();
+        if (parts.length >= 2) return parts[parts.length - 1] + '|' + parts[0];
+        return normName(props.name || '');
+      }
+      function directorKey(d) {
+        var name = normName((d.properties || {}).name || '');
+        // Director names: "SURNAME, Forename Middle"
+        var comma = name.indexOf(',');
+        if (comma > 0) {
+          var sn = name.substring(0, comma).trim();
+          var rest = name.substring(comma + 1).trim().split(' ');
+          var fn = rest[0] || '';
+          return sn + '|' + fn;
+        }
+        var parts = name.split(' ').filter(function(x) { return x; });
+        if (parts.length >= 2) return parts[parts.length - 1] + '|' + parts[0];
+        return name;
+      }
+
+      // Find matching pairs per company
+      var merged = {};  // director.id -> person.id (director merges into person)
       Object.values(companyLinks).forEach(function(cl) {
         cl.persons.forEach(function(p) {
+          var pk = personKey(p);
+          if (!pk) return;
           cl.directors.forEach(function(d) {
-            // Fuzzy match: check if surname matches (last word)
-            var pParts = p.name.split(' ');
-            var dParts = d.name.split(',')[0].trim().split(' ');  // Director names are "SURNAME, Forename"
-            var pSurname = pParts[pParts.length - 1];
-            var dSurname = dParts[0];
-            if (pSurname === dSurname || p.name === d.name) {
-              dualIds[p.id] = true;
-              dualIds[d.id] = true;
+            if (merged[d.id]) return;  // already merged
+            var dk = directorKey(d);
+            if (pk === dk) {
+              merged[d.id] = p.id;
             }
           });
         });
       });
 
-      // Mark dual-role nodes with a distinctive border
-      Object.keys(dualIds).forEach(function(nid) {
-        var n = nodes.get(nid);
-        if (n && !n._dualMarked) {
+      // Apply merges: move director edges to the person node, remove director node
+      Object.keys(merged).forEach(function(dirId) {
+        var personId = merged[dirId];
+        // Rewire edges from director to person
+        allEdges.forEach(function(e) {
+          if (e.from === dirId) {
+            edges.update({ id: e.id, from: personId });
+          }
+        });
+        // Remove the director node
+        try { nodes.remove(dirId); } catch(ex) {}
+        // Mark the person node as dual-role
+        var pn = nodes.get(personId);
+        if (pn && !pn._dualMarked) {
           nodes.update({
-            id: nid,
+            id: personId,
             borderWidth: 4,
-            color: { border: '#FF6600', background: n.color.background || n.color },
+            color: { border: '#FF6600', background: pn.color.background || pn.color },
             _dualMarked: true
           });
         }
