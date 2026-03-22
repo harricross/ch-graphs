@@ -417,6 +417,11 @@ def api_stream():
         import json as _json
 
         def send(event, data):
+            if event != "data":
+                print(f"  [{company}] {data}", flush=True)
+            else:
+                d = _json.loads(data)
+                print(f"  [{company}] +{len(d.get('nodes',[]))} nodes, +{len(d.get('edges',[]))} edges", flush=True)
             return f"event: {event}\ndata: {data}\n\n"
 
         d = get_driver()
