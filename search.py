@@ -660,8 +660,9 @@ def export_html(nodes, rels, flat_rows, output_path):
              padding: 14px 18px; border-radius: 10px; font-size: 13px; z-index: 10; max-width: 320px; }}
     #controls h3 {{ margin: 0 0 8px 0; font-size: 16px; }}
     .legend {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }}
-    .legend-item {{ display: flex; align-items: center; gap: 5px; }}
-    .legend-dot {{ width: 12px; height: 12px; border-radius: 2px; }}
+    .legend-item {{ display: flex; align-items: center; gap: 5px; font-size: 12px; }}
+    .legend-shape {{ width: 14px; height: 14px; display: inline-block; }}
+    .legend-line {{ width: 20px; height: 3px; display: inline-block; border-radius: 1px; }}
     .btn {{ background: #2a2a4a; border: 1px solid #4a4a7a; color: #ccc; padding: 6px 12px;
             border-radius: 5px; cursor: pointer; font-size: 12px; margin: 2px; }}
     .btn:hover {{ background: #3a3a6a; color: #fff; }}
@@ -684,16 +685,20 @@ def export_html(nodes, rels, flat_rows, output_path):
     <h3>Companies House Ownership Tree</h3>
     <div>{len(vis_nodes)} nodes, {len(vis_edges)} relationships</div>
     <div class="legend">
-      {"".join(f'<span class="legend-item"><span class="legend-dot" style="background:{c}"></span>{l}</span>' for l, c in label_colors.items())}
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="#4C8BF5"/></svg>Company</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="#34A853"/></svg>Person</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" fill="#FBBC04"/></svg>Corporate Entity</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,1 13,13 1,13" fill="#EA4335"/></svg>Legal Person</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,13 1,1 13,1" fill="#00BCD4"/></svg>Director</span>
     </div>
     <div style="margin-top: 8px; font-size: 11px; color: #aaa;">Arrow colours:</div>
     <div class="legend" style="margin-top: 2px;">
-      <span class="legend-item"><span class="legend-dot" style="background:#e74c3c"></span>75-100%</span>
-      <span class="legend-item"><span class="legend-dot" style="background:#e67e22"></span>50-75%</span>
-      <span class="legend-item"><span class="legend-dot" style="background:#f1c40f"></span>25-50%</span>
-      <span class="legend-item"><span class="legend-dot" style="background:#9b59b6"></span>Directors</span>
-      <span class="legend-item"><span class="legend-dot" style="background:#3498db"></span>Influence</span>
-      <span class="legend-item"><span class="legend-dot" style="background:#00BCD4"></span>Director</span>
+      <span class="legend-item"><span class="legend-line" style="background:#e74c3c"></span>75-100%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#e67e22"></span>50-75%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#f1c40f"></span>25-50%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#9b59b6"></span>Appoint directors</span>
+      <span class="legend-item"><span class="legend-line" style="background:#3498db"></span>Significant influence</span>
+      <span class="legend-item"><span class="legend-line" style="background:#00BCD4"></span>Officer/Director</span>
     </div>
     <div class="btn-row">
       <button class="btn" onclick="toggleLayout()">Toggle Layout</button>
