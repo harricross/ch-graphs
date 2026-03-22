@@ -962,12 +962,13 @@ def _build_vis_data(nodes, rels):
         return name
 
     def _director_key(n):
-        name = _norm_name(n["properties"].get("name", ""))
-        if "," in name:
-            parts = name.split(",", 1)
-            sn = parts[0].strip()
-            fn = parts[1].strip().split()[0] if parts[1].strip() else ""
+        raw_name = (n["properties"].get("name", "") or "").upper().strip()
+        if "," in raw_name:
+            parts = raw_name.split(",", 1)
+            sn = _norm_name(parts[0])
+            fn = _norm_name(parts[1]).split()[0] if _norm_name(parts[1]) else ""
             return sn + "|" + fn
+        name = _norm_name(raw_name)
         parts = name.split()
         if len(parts) >= 2:
             return parts[-1] + "|" + parts[0]
