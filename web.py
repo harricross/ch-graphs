@@ -825,7 +825,9 @@ def api_stream():
             else:
                 d = _json.loads(data)
                 print(f"  [{company}] +{len(d.get('nodes',[]))} nodes, +{len(d.get('edges',[]))} edges", flush=True)
-            return f"event: {event}\ndata: {data}\n\n"
+            # SSE data fields can't contain bare newlines — split into multiple data: lines
+            lines = data.replace('\n', '\ndata: ')
+            return f"event: {event}\ndata: {lines}\n\n"
 
         d = get_driver()
 
