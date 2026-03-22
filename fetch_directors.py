@@ -275,7 +275,10 @@ def main():
     unchanged = 0
 
     # Get freshness metadata for all companies at once
+    print("  Checking data freshness...", flush=True)
     meta = get_fetch_metadata(driver, companies)
+    stale_count = sum(1 for cn in companies if needs_refresh(meta.get(cn, {}).get("fetchedAt")))
+    print(f"  {stale_count} need fetching, {len(companies) - stale_count} are fresh", flush=True)
 
     for i, cn in enumerate(companies, 1):
         m = meta.get(cn, {"fetchedAt": None, "etag": None})
@@ -285,7 +288,7 @@ def main():
             skipped += 1
             continue
 
-        print(f"  [{i}/{len(companies)}] {cn}...", end=" ")
+        print(f"  [{i}/{len(companies)}] {cn}...", end=" ", flush=True)
         officers, new_etag, modified = fetch_officers(args.api_key, cn, etag=m["etag"])
 
         if not modified:
@@ -293,7 +296,7 @@ def main():
             with driver.session() as session:
                 session.run(STAMP_FETCH_QUERY, cn=cn, etag=m["etag"])
             unchanged += 1
-            print("unchanged (304)")
+            print("unchanged (304)", flush=True)
             continue
 
         if args.active_only:
@@ -302,7 +305,7 @@ def main():
         loaded = load_officers_to_neo4j(driver, cn, officers, etag=new_etag)
         total_officers += loaded
         fetched += 1
-        print(f"{loaded} officers")
+        print(f"-> {loaded} officers loaded", flush=True)
         time.sleep(RATE_LIMIT_DELAY)
 
     driver.close()
