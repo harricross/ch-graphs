@@ -407,8 +407,62 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       // Check if existing nodes use levels
       var hasLevels = nodes.get().some(function(n) { return n.level !== undefined; });
 
+      // Build a map of registrationNumber -> existing CorporateEntity node ID
+      // so we can merge Company nodes with their CorporateEntity counterparts
+      var regNumToNodeId = {};
+      nodes.get().forEach(function(n) {
+        if (n.group === 'CorporateEntity') {
+          var reg = (n.properties || {}).registrationNumber || '';
+          if (reg) {
+            // Store both raw and padded versions
+            regNumToNodeId[reg] = n.id;
+            if (/^\d+$/.test(reg)) regNumToNodeId[('00000000' + reg).slice(-8)] = n.id;
+          }
+        }
+      });
+
+      // Also map companyNumber -> existing Company node ID
+      var cnToNodeId = {};
+      nodes.get().forEach(function(n) {
+        if (n.group === 'Company') {
+          var cn = (n.properties || {}).companyNumber || '';
+          if (cn) cnToNodeId[cn] = n.id;
+        }
+      });
+
+      // Remap table: new node ID -> existing node ID (for merging)
+      var remap = {};
+
       (d.nodes || []).forEach(function(n) {
         if (!nodes.get(n.id)) {
+          var cn = (n.properties || {}).companyNumber || '';
+
+          // Check if this new Company node matches an existing CorporateEntity
+          if (n.group === 'Company' && cn && regNumToNodeId[cn]) {
+            // Merge: update existing CE node to look like a Company, remap edges
+            var ceId = regNumToNodeId[cn];
+            remap[n.id] = ceId;
+            // Update the existing node with company data
+            var update = { id: ceId, label: n.label, color: n.color, group: 'Company',
+              size: n.size, shape: n.shape, properties: n.properties, title: n.title };
+            if (n.level !== undefined) update.level = n.level;
+            nodes.update(update);
+            return;  // don't add as new node
+          }
+
+          // Check if this new CorporateEntity matches an existing Company
+          if (n.group === 'CorporateEntity') {
+            var reg = (n.properties || {}).registrationNumber || '';
+            var padded = /^\d+$/.test(reg) ? ('00000000' + reg).slice(-8) : reg;
+            if (reg && cnToNodeId[padded]) {
+              remap[n.id] = cnToNodeId[padded];
+              return;  // skip, company already exists
+            }
+            if (reg && cnToNodeId[reg]) {
+              remap[n.id] = cnToNodeId[reg];
+              return;
+            }
+          }
           // If existing graph uses levels but this node doesn't have one, assign one
           if (hasLevels && n.level === undefined) {
             // Find a connected edge to determine level relative to a known node
@@ -445,8 +499,14 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       });
       var existing = edges.get();
       (d.edges || []).forEach(function(e) {
-        var dup = existing.some(function(ex) { return ex.from === e.from && ex.to === e.to && ex.label === e.label; });
-        if (!dup) { edges.add(e); added++; }
+        // Apply remap to edge endpoints
+        var from = remap[e.from] || e.from;
+        var to = remap[e.to] || e.to;
+        var dup = existing.some(function(ex) { return ex.from === from && ex.to === to && ex.label === e.label; });
+        if (!dup && nodes.get(from) && nodes.get(to)) {
+          edges.add({ from: from, to: to, label: e.label, title: e.title, arrows: e.arrows, color: e.color, width: e.width });
+          added++;
+        }
       });
       updateStats();
       if (added > 0) network.fit({ animation: true });
