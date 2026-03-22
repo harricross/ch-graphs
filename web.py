@@ -1202,6 +1202,30 @@ def _build_vis_data(nodes, rels):
     # Compute hierarchy levels
     levels = _compute_levels(merged_nodes, merged_rels)
 
+    # Compute control weight per node from ownership edges
+    # Higher ownership % = bigger node
+    def _control_score(noc_list):
+        if not noc_list:
+            return 0
+        noc_str = " ".join(noc_list) if isinstance(noc_list, list) else str(noc_list)
+        if "75-to-100" in noc_str:
+            return 4
+        if "50-to-75" in noc_str:
+            return 3
+        if "25-to-50" in noc_str:
+            return 2
+        return 1
+
+    node_max_control = {}  # node_id -> max control score across all relationships
+    for r in merged_rels:
+        if r["type"] == "HAS_SIGNIFICANT_CONTROL":
+            score = _control_score(r["properties"].get("naturesOfControl", []))
+            src = r["startId"]
+            node_max_control[src] = max(node_max_control.get(src, 0), score)
+            # Also boost the controlled company based on how strongly it's controlled
+            dst = r["endId"]
+            node_max_control[dst] = max(node_max_control.get(dst, 0), score)
+
     seen_edges = set()
     vis_nodes = []
     for n in merged_nodes.values():
@@ -1219,7 +1243,8 @@ def _build_vis_data(nodes, rels):
         node_data = {
             "id": n["id"], "label": display, "title": props.get("name", ""),
             "color": label_colors.get(label, "#999"), "group": label,
-            "size": node_sizes.get(label, 15), "shape": node_shapes.get(label, "dot"),
+            "size": node_sizes.get(label, 15) + node_max_control.get(n["id"], 0) * 5,
+            "shape": node_shapes.get(label, "dot"),
             "properties": safe_props,
         }
         if n["id"] in levels:
