@@ -301,7 +301,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       nodes: { font: { color: '#eee', size: 10, multi: 'md', face: 'arial' },
         borderWidth: 2, widthConstraint: { maximum: 150 } },
       edges: { color: { color: '#666', highlight: '#fff', hover: '#aaa' },
-        font: { color: '#999', size: 8, strokeWidth: 0, background: 'rgba(0,0,0,0.5)' },
+        font: { size: 0 },
         smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 }, width: 1.5 },
       interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true }
     };
@@ -1081,8 +1081,9 @@ def _build_vis_data(nodes, rels):
             elabel = role.replace("_", " ").title()
         else:
             elabel = r["type"].replace("HAS_SIGNIFICANT_CONTROL", "CONTROLS").replace("_", " ")
-        vis_edges.append({"from": r["startId"], "to": r["endId"], "label": elabel,
-                          "title": noc or r["type"], "arrows": "to",
+        tooltip = elabel + (": " + noc if noc else "")
+        vis_edges.append({"from": r["startId"], "to": r["endId"],
+                          "title": tooltip, "arrows": "to",
                           "color": {"color": col, "highlight": "#fff", "hover": col}, "width": width})
 
     return {"nodes": vis_nodes, "edges": vis_edges}
