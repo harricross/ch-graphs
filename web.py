@@ -1304,12 +1304,9 @@ def _build_vis_data(nodes, rels):
 
 
 def _compute_positions(vis_nodes, vis_edges):
-    """Assign x/y positions to nodes for a clean layout.
-    Companies arranged vertically by hierarchy level.
-    Directors/Persons spread horizontally around their connected company."""
+    """Assign x/y positions to nodes. Companies in a grid, satellites orbiting."""
     import math
 
-    # Build adjacency: node_id -> list of connected company node_ids
     company_ids = set()
     node_by_id = {}
     for n in vis_nodes:
@@ -1317,8 +1314,8 @@ def _compute_positions(vis_nodes, vis_edges):
         if n["group"] == "Company":
             company_ids.add(n["id"])
 
-    # Map non-company nodes to their connected company
-    node_to_companies = {}  # node_id -> [company_id]
+    # Map non-company nodes to their connected companies
+    node_to_companies = {}
     for e in vis_edges:
         src, dst = e.get("from"), e.get("to")
         if dst in company_ids and src not in company_ids:
@@ -1326,8 +1323,17 @@ def _compute_positions(vis_nodes, vis_edges):
         if src in company_ids and dst not in company_ids:
             node_to_companies.setdefault(dst, []).append(src)
 
+    # Count satellites per company (for spacing calculation)
+    company_sat_count = {cid: 0 for cid in company_ids}
+    for n in vis_nodes:
+        if n["id"] in company_ids:
+            continue
+        companies = [c for c in node_to_companies.get(n["id"], []) if c in company_ids]
+        if len(companies) == 1:
+            company_sat_count[companies[0]] = company_sat_count.get(companies[0], 0) + 1
+
     # Group companies by level
-    level_companies = {}  # level -> [company_id]
+    level_companies = {}
     for n in vis_nodes:
         if n["id"] in company_ids:
             lvl = n.get("level", 0) or 0
@@ -1336,85 +1342,87 @@ def _compute_positions(vis_nodes, vis_edges):
     if not level_companies:
         return
 
-    # Layout companies: wrap into grid per level, levels go top to bottom
-    X_SPACING = 400
-    Y_SPACING = 350
-    SATELLITE_RADIUS = 180
-    MAX_PER_ROW = 5  # max companies per row before wrapping
+    # Dynamic spacing: wider for companies with many satellites
+    BASE_RADIUS = 120
+    RADIUS_PER_SAT = 15
+    MIN_SPACING = 350
+    Y_SPACING = 400
+    MAX_PER_ROW = 4
+
+    def sat_radius(cid):
+        count = company_sat_count.get(cid, 0)
+        return BASE_RADIUS + count * RADIUS_PER_SAT
 
     sorted_levels = sorted(level_companies.keys())
-    company_positions = {}  # company_id -> (x, y)
+    company_positions = {}
 
     y_offset = 0
     for lvl in sorted_levels:
         companies = level_companies[lvl]
         rows = [companies[i:i+MAX_PER_ROW] for i in range(0, len(companies), MAX_PER_ROW)]
         for row in rows:
-            total_width = (len(row) - 1) * X_SPACING
-            start_x = -total_width / 2
+            # Calculate spacing for this row based on max satellite radius
+            spacings = []
+            for i in range(len(row)):
+                r = sat_radius(row[i]) * 2 + 80
+                spacings.append(max(MIN_SPACING, r))
+            # Place companies with these spacings
+            total_width = sum(spacings[:-1]) if len(spacings) > 1 else 0
+            x = -total_width / 2
             for i, cid in enumerate(row):
-                x = start_x + i * X_SPACING
                 company_positions[cid] = (x, y_offset)
                 node_by_id[cid]["x"] = x
                 node_by_id[cid]["y"] = y_offset
-            y_offset += Y_SPACING
+                if i < len(row) - 1:
+                    x += spacings[i]
+            # Row height based on max satellite radius in this row
+            max_rad = max(sat_radius(c) for c in row) if row else BASE_RADIUS
+            y_offset += max(Y_SPACING, max_rad * 2 + 150)
 
-    # Layout satellite nodes (Directors, Persons, etc.)
-    # Multi-company satellites placed at centroid of their companies
-    # Single-company satellites orbit around their company
-    placed_satellites = set()
+    # Place satellite nodes
+    placed = set()
     orphans = []
 
+    # Multi-company satellites at centroid
     for n in vis_nodes:
         if n["id"] in company_ids:
             continue
-        companies = node_to_companies.get(n["id"], [])
-        positioned_companies = [c for c in companies if c in company_positions]
-
-        if len(positioned_companies) > 1:
-            # Place at centroid of connected companies
-            cx = sum(company_positions[c][0] for c in positioned_companies) / len(positioned_companies)
-            cy = sum(company_positions[c][1] for c in positioned_companies) / len(positioned_companies)
-            # Offset slightly to avoid overlap with company nodes
+        companies = [c for c in node_to_companies.get(n["id"], []) if c in company_positions]
+        if len(companies) > 1:
+            cx = sum(company_positions[c][0] for c in companies) / len(companies)
+            cy = sum(company_positions[c][1] for c in companies) / len(companies)
             node_by_id[n["id"]]["x"] = cx + 50
             node_by_id[n["id"]]["y"] = cy - 80
-            placed_satellites.add(n["id"])
-        elif len(positioned_companies) == 1:
-            # Will be placed in orbit below
-            pass
-        else:
+            placed.add(n["id"])
+        elif not companies:
             orphans.append(n["id"])
 
-    # Orbit single-company satellites
-    company_satellites = {}
+    # Single-company satellites in orbit
+    company_sats = {}
     for n in vis_nodes:
-        if n["id"] in company_ids or n["id"] in placed_satellites or n["id"] in set(orphans):
+        if n["id"] in company_ids or n["id"] in placed or n["id"] in set(orphans):
             continue
-        companies = node_to_companies.get(n["id"], [])
-        positioned = [c for c in companies if c in company_positions]
-        if positioned:
-            company_satellites.setdefault(positioned[0], []).append(n["id"])
+        companies = [c for c in node_to_companies.get(n["id"], []) if c in company_positions]
+        if companies:
+            company_sats.setdefault(companies[0], []).append(n["id"])
 
-    for cid, sats in company_satellites.items():
+    for cid, sats in company_sats.items():
         cx, cy = company_positions.get(cid, (0, 0))
+        radius = sat_radius(cid)
         count = len(sats)
-        # Scale radius with satellite count so they don't overlap
-        radius = SATELLITE_RADIUS + max(0, (count - 4) * 20)
         for i, sid in enumerate(sats):
             angle = (2 * math.pi * i / count) - math.pi / 2
-            sx = cx + radius * math.cos(angle)
-            sy = cy + radius * math.sin(angle)
-            node_by_id[sid]["x"] = sx
-            node_by_id[sid]["y"] = sy
+            node_by_id[sid]["x"] = cx + radius * math.cos(angle)
+            node_by_id[sid]["y"] = cy + radius * math.sin(angle)
 
-    # Place orphans in a row below everything
+    # Orphans below
     if orphans:
-        max_y = max(pos[1] for pos in company_positions.values()) if company_positions else 0
-        orphan_y = max_y + Y_SPACING
-        total_w = (len(orphans) - 1) * 150
+        max_y = max(p[1] for p in company_positions.values()) if company_positions else 0
+        oy = max_y + Y_SPACING
+        tw = (len(orphans) - 1) * 150
         for i, oid in enumerate(orphans):
-            node_by_id[oid]["x"] = -total_w / 2 + i * 150
-            node_by_id[oid]["y"] = orphan_y
+            node_by_id[oid]["x"] = -tw / 2 + i * 150
+            node_by_id[oid]["y"] = oy
 
 
 @app.route("/exports/<path:filename>")
