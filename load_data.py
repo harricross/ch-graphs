@@ -26,8 +26,16 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-COMPANY_CSV = "data/BasicCompanyDataAsOneFile-2026-03-02.csv"
-PSC_JSONL = "data/persons-with-significant-control-snapshot-2026-03-22.txt"
+import glob
+
+def _find_file(pattern, label):
+    matches = sorted(glob.glob(pattern))
+    if matches:
+        return matches[-1]  # most recent
+    return None
+
+COMPANY_CSV = _find_file("data/BasicCompanyDataAsOneFile-*.csv", "Company CSV")
+PSC_JSONL = _find_file("data/persons-with-significant-control-snapshot-*.txt", "PSC JSONL")
 OUTPUT_DIR = "data/import"
 
 # ---------------------------------------------------------------------------
@@ -348,14 +356,16 @@ def process_psc(psc_jsonl, out_dir):
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    if not Path(COMPANY_CSV).exists():
-        sys.exit(f"Error: {COMPANY_CSV} not found")
-    if not Path(PSC_JSONL).exists():
-        sys.exit(f"Error: {PSC_JSONL} not found")
+    if not COMPANY_CSV:
+        sys.exit("Error: No data/BasicCompanyDataAsOneFile-*.csv found. Place the Companies House CSV in data/")
+    if not PSC_JSONL:
+        sys.exit("Error: No data/persons-with-significant-control-snapshot-*.txt found. Place the PSC file in data/")
 
     print("=" * 60)
     print("Companies House -> Neo4j Bulk Import CSV Generator")
     print("=" * 60)
+    print(f"  Company CSV: {COMPANY_CSV}")
+    print(f"  PSC JSONL:   {PSC_JSONL}")
 
     process_companies(COMPANY_CSV, OUTPUT_DIR)
     process_psc(PSC_JSONL, OUTPUT_DIR)
