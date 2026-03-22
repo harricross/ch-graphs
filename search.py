@@ -673,6 +673,10 @@ def export_html(nodes, rels, flat_rows, output_path):
     #details table {{ border-collapse: collapse; width: 100%; }}
     #details td {{ padding: 2px 6px; border-bottom: 1px solid #333; vertical-align: top; word-break: break-all; }}
     #details td:first-child {{ color: #aaa; white-space: nowrap; }}
+    .expand-btn {{ background: #4C8BF5; border: none; color: #fff; padding: 6px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; margin-bottom: 8px; display: block; }}
+    .expand-btn:hover {{ background: #3a7be0; }}
+    .spinner-sm {{ width: 20px; height: 20px; border: 3px solid #333; border-top: 3px solid #4C8BF5; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 8px 0; }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
   </style>
 </head>
 <body>
@@ -780,7 +784,12 @@ def export_html(nodes, rels, flat_rows, output_path):
         var nodeId = params.nodes[0];
         var node = nodes.get(nodeId);
         var props = node.properties || {{}};
-        var h = '<h4>' + escHtml(node.group || '') + '</h4><table>';
+        var cn = props.companyNumber || '';
+        var h = '<h4>' + escHtml(node.group || '') + '</h4>';
+        if (cn && node.group === 'Company') {{
+          h += '<button class="expand-btn" onclick="expandCompany(\'' + escHtml(cn) + '\')">Expand ownership tree</button>';
+        }}
+        h += '<table>';
         Object.keys(props).forEach(function(key) {{
           h += '<tr><td>' + escHtml(key) + '</td><td>' + escHtml(props[key]) + '</td></tr>';
         }});
@@ -791,6 +800,62 @@ def export_html(nodes, rels, flat_rows, output_path):
         panel.style.display = 'none';
       }}
     }});
+
+    // Double-click a Company node to expand it inline
+    network.on('doubleClick', function(params) {{
+      if (params.nodes.length > 0) {{
+        var nodeId = params.nodes[0];
+        var node = nodes.get(nodeId);
+        var cn = (node.properties || {{}}).companyNumber;
+        if (cn && node.group === 'Company') {{
+          expandCompany(cn);
+        }}
+      }}
+    }});
+
+    var expanding = {{}};
+    function expandCompany(cn) {{
+      if (expanding[cn]) return;
+      expanding[cn] = true;
+      var panel = document.getElementById('details');
+      panel.innerHTML = '<h4>Loading ' + escHtml(cn) + '...</h4><div class="spinner-sm"></div>';
+      panel.style.display = 'block';
+
+      fetch('/api/expand?company=' + encodeURIComponent(cn))
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+          if (data.error) {{
+            panel.innerHTML = '<h4>Error</h4><p>' + escHtml(data.error) + '</p>';
+            expanding[cn] = false;
+            return;
+          }}
+          var added = 0;
+          (data.nodes || []).forEach(function(n) {{
+            if (!nodes.get(n.id)) {{
+              nodes.add(n);
+              added++;
+            }}
+          }});
+          (data.edges || []).forEach(function(e) {{
+            // Check for duplicate edges
+            var existing = edges.get();
+            var isDup = existing.some(function(ex) {{
+              return ex.from === e.from && ex.to === e.to && ex.label === e.label;
+            }});
+            if (!isDup) {{
+              edges.add(e);
+              added++;
+            }}
+          }});
+          panel.innerHTML = '<h4>Expanded ' + escHtml(cn) + '</h4><p>Added ' + added + ' items</p>';
+          expanding[cn] = false;
+          network.fit({{ animation: true }});
+        }})
+        .catch(function(err) {{
+          panel.innerHTML = '<h4>Error</h4><p>' + escHtml(err.toString()) + '</p>';
+          expanding[cn] = false;
+        }});
+    }}
 
     function escHtml(s) {{
       var d = document.createElement('div');
