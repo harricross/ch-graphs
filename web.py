@@ -331,6 +331,11 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         var h = '<h4>' + escHtml(node.group || '') + '</h4>';
         if (cn && node.group === 'Company') {
           h += '<button class="expand-btn" onclick="expandNode(&quot;company&quot;, &quot;' + escHtml(cn) + '&quot;)">Expand ownership tree</button>';
+          var pc = props.postcode || '';
+          var addr = props.addressLine1 || '';
+          if (pc) {
+            h += '<button class="expand-btn" onclick="expandNode(&quot;address&quot;, &quot;' + escHtml(pc) + '|' + escHtml(addr) + '&quot;)">Companies at ' + escHtml(pc) + '</button>';
+          }
         }
         if (node.group === 'Person' || node.group === 'Director') {
           h += '<button class="expand-btn" onclick="expandNode(&quot;person&quot;, &quot;' + escHtml(nodeId) + '&quot;)">Find all companies</button>';
@@ -790,6 +795,30 @@ def api_expand():
                 "RETURN path LIMIT 50",
                 nid=expand_id,
             ))
+
+    elif expand_type == "address":
+        # Find companies at the same postcode (and optionally same address line)
+        parts = expand_id.split("|", 1)
+        postcode = parts[0].strip()
+        addr_line = parts[1].strip() if len(parts) > 1 else ""
+
+        with d.session() as session:
+            if addr_line:
+                # Exact address match first
+                records = list(session.run(
+                    "MATCH (c:Company) "
+                    "WHERE c.postcode = $pc AND c.addressLine1 = $addr "
+                    "RETURN c LIMIT 50",
+                    pc=postcode, addr=addr_line,
+                ))
+            if not addr_line or len(records) < 2:
+                # Fall back to postcode-only match
+                records = list(session.run(
+                    "MATCH (c:Company) "
+                    "WHERE c.postcode = $pc "
+                    "RETURN c LIMIT 50",
+                    pc=postcode,
+                ))
 
     else:
         return jsonify({"error": f"Unknown type: {expand_type}"}), 400
