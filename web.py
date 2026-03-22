@@ -338,8 +338,11 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         if (node.group === 'CorporateEntity') {
           var regNum = props.registrationNumber || '';
           if (regNum) {
-            h += '<button class="expand-btn" onclick="expandNode(&quot;company&quot;, &quot;' + escHtml(regNum) + '&quot;)">Expand as company</button>';
+            // Pad to 8 digits if purely numeric
+            var padded = /^\d+$/.test(regNum) ? ('00000000' + regNum).slice(-8) : regNum;
+            h += '<button class="expand-btn" onclick="expandNode(&quot;company&quot;, &quot;' + escHtml(padded) + '&quot;)">Expand as company</button>';
           }
+          h += '<button class="expand-btn" onclick="expandNode(&quot;corporate&quot;, &quot;' + escHtml(nodeId) + '&quot;)">Find controlled companies</button>';
         }
         h += '<table>';
         Object.keys(props).forEach(function(key) {
@@ -769,14 +772,25 @@ def api_expand():
             records.extend(list(session.run(dir_query)))
 
     elif expand_type == "person":
-        # Find all companies this person/director controls or is officer of
+        # Find all companies this person/director controls or is officer of (limit 50)
         with d.session() as session:
             records = list(session.run(
                 "MATCH (n) WHERE elementId(n) = $nid "
                 "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL|OFFICER_OF]->(c:Company) "
-                "RETURN path",
+                "RETURN path LIMIT 50",
                 nid=expand_id,
             ))
+
+    elif expand_type == "corporate":
+        # Find all companies this corporate entity controls
+        with d.session() as session:
+            records = list(session.run(
+                "MATCH (n) WHERE elementId(n) = $nid "
+                "MATCH path = (n)-[:HAS_SIGNIFICANT_CONTROL]->(c:Company) "
+                "RETURN path LIMIT 50",
+                nid=expand_id,
+            ))
+
     else:
         return jsonify({"error": f"Unknown type: {expand_type}"}), 400
 
