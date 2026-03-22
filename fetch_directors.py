@@ -158,37 +158,49 @@ RETURN cn, c.directorsFetchedAt AS fetchedAt, c.directorsEtag AS etag
 STALE_DAYS = 30
 
 CREATE_INDEXES_QUERY = [
+    "CREATE CONSTRAINT director_id IF NOT EXISTS FOR (d:Director) REQUIRE d.directorId IS UNIQUE",
     "CREATE INDEX director_name IF NOT EXISTS FOR (d:Director) ON (d.name)",
     "CREATE FULLTEXT INDEX director_name_fulltext IF NOT EXISTS FOR (d:Director) ON EACH [d.name]",
 ]
 
 
-def load_officers_to_neo4j(driver, company_number, officers, etag=None):
-    """Load officers into Neo4j and stamp fetch metadata."""
-    batch = []
-    for o in officers:
-        role = o.get("officer_role", "")
-        dob = o.get("date_of_birth", {})
+SINGLE_DIRECTOR_QUERY = """
+MATCH (c:Company {companyNumber: $companyNumber})
+MERGE (d:Director {directorId: $directorId})
+SET d.name         = $name,
+    d.nationality  = $nationality,
+    d.occupation   = $occupation,
+    d.countryOfResidence = $countryOfResidence
+MERGE (d)-[r:OFFICER_OF]->(c)
+SET r.role         = $role,
+    r.appointedOn  = $appointedOn,
+    r.resignedOn   = $resignedOn
+"""
 
-        batch.append({
+
+def load_officers_to_neo4j(driver, company_number, officers, etag=None):
+    """Load officers into Neo4j one at a time and stamp fetch metadata."""
+    loaded = 0
+    for o in officers:
+        params = {
             "companyNumber": company_number,
             "directorId": make_director_id(o),
             "name": o.get("name", ""),
             "nationality": o.get("nationality", ""),
             "occupation": o.get("occupation", ""),
             "countryOfResidence": o.get("country_of_residence", ""),
-            "role": role,
+            "role": o.get("officer_role", ""),
             "appointedOn": o.get("appointed_on", ""),
             "resignedOn": o.get("resigned_on", ""),
-        })
+        }
+        with driver.session(database="neo4j") as session:
+            session.run(SINGLE_DIRECTOR_QUERY, **params)
+        loaded += 1
 
-    with driver.session() as session:
-        if batch:
-            session.run(UPSERT_DIRECTOR_QUERY, batch=batch)
-        # Always stamp fetch time + etag (even if 0 officers)
+    with driver.session(database="neo4j") as session:
         session.run(STAMP_FETCH_QUERY, cn=company_number, etag=etag or "")
 
-    return len(batch)
+    return loaded
 
 
 def get_fetch_metadata(driver, company_numbers):
