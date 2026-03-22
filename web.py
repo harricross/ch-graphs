@@ -208,97 +208,394 @@ def search():
     return render_template_string(SEARCH_TEMPLATE, q=q, results=results)
 
 
+GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>CH Graphs — {{ company }}</title>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; background: #0f0f1a; color: #eee; }
+    #graph { width: 100vw; height: 100vh; }
+    #controls { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.85);
+      padding: 14px 18px; border-radius: 10px; font-size: 13px; z-index: 10; max-width: 340px; }
+    #controls h3 { margin: 0 0 8px 0; font-size: 16px; }
+    #status { color: #f1c40f; margin: 8px 0; font-size: 12px; min-height: 16px; }
+    #status.done { color: #34A853; }
+    #status.error { color: #e74c3c; }
+    .legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+    .legend-shape { width: 14px; height: 14px; display: inline-block; }
+    .legend-line { width: 20px; height: 3px; display: inline-block; border-radius: 1px; }
+    .btn { background: #2a2a4a; border: 1px solid #4a4a7a; color: #ccc; padding: 6px 12px;
+      border-radius: 5px; cursor: pointer; font-size: 12px; margin: 2px; }
+    .btn:hover { background: #3a3a6a; color: #fff; }
+    .btn-row { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+    #details { position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.85);
+      padding: 14px 18px; border-radius: 10px; font-size: 12px; z-index: 10;
+      max-width: 400px; max-height: 50vh; overflow-y: auto; display: none; }
+    #details h4 { margin: 0 0 6px 0; }
+    #details table { border-collapse: collapse; width: 100%; }
+    #details td { padding: 2px 6px; border-bottom: 1px solid #333; vertical-align: top; word-break: break-all; }
+    #details td:first-child { color: #aaa; white-space: nowrap; }
+    .expand-btn { background: #4C8BF5; border: none; color: #fff; padding: 6px 14px; border-radius: 5px;
+      cursor: pointer; font-size: 12px; margin-bottom: 8px; display: block; }
+    .expand-btn:hover { background: #3a7be0; }
+    .spinner-sm { width: 20px; height: 20px; border: 3px solid #333; border-top: 3px solid #4C8BF5;
+      border-radius: 50%; animation: spin 0.8s linear infinite; margin: 8px 0; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #stats { font-size: 12px; color: #888; }
+    a.back { color: #4C8BF5; text-decoration: none; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <a class="back" href="/">← Back to search</a>
+    <h3 style="margin-top: 6px;">{{ company }}</h3>
+    <div id="stats">Loading...</div>
+    <div id="status"><span class="spinner-sm"></span> Querying ownership tree...</div>
+    <div class="legend">
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="#4C8BF5"/></svg>Company</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="#34A853"/></svg>Person</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" fill="#FBBC04"/></svg>Corp Entity</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,1 13,13 1,13" fill="#EA4335"/></svg>Legal Person</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,13 1,1 13,1" fill="#00BCD4"/></svg>Director</span>
+    </div>
+    <div style="margin-top: 6px; font-size: 11px; color: #aaa;">Arrow colours:</div>
+    <div class="legend" style="margin-top: 2px;">
+      <span class="legend-item"><span class="legend-line" style="background:#e74c3c"></span>75-100%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#e67e22"></span>50-75%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#f1c40f"></span>25-50%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#9b59b6"></span>Appoint dirs</span>
+      <span class="legend-item"><span class="legend-line" style="background:#3498db"></span>Influence</span>
+      <span class="legend-item"><span class="legend-line" style="background:#00BCD4"></span>Officer</span>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="toggleLayout()">Toggle Layout</button>
+      <button class="btn" onclick="network.fit()">Fit View</button>
+      <button class="btn" onclick="togglePhysics()">Toggle Physics</button>
+    </div>
+  </div>
+  <div id="details"></div>
+  <div id="graph"></div>
+  <script>
+    var nodes = new vis.DataSet();
+    var edges = new vis.DataSet();
+    var container = document.getElementById('graph');
+    var data = { nodes: nodes, edges: edges };
+    var hierarchical = true, physicsOn = true;
+
+    var hierOpts = {
+      layout: { hierarchical: { enabled: true, direction: 'UD', sortMethod: 'directed',
+        levelSeparation: 150, nodeSpacing: 250, treeSpacing: 250 } },
+      physics: { enabled: true, hierarchicalRepulsion: { centralGravity: 0.0,
+        springLength: 150, springConstant: 0.01, nodeDistance: 200, damping: 0.09 },
+        stabilization: { iterations: 300 } },
+      nodes: { font: { color: '#eee', size: 10, multi: 'md', face: 'arial' },
+        borderWidth: 2, widthConstraint: { maximum: 150 } },
+      edges: { color: { color: '#666', highlight: '#fff', hover: '#aaa' },
+        font: { color: '#999', size: 8, strokeWidth: 0, background: 'rgba(0,0,0,0.5)' },
+        smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 }, width: 1.5 },
+      interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true }
+    };
+    var forceOpts = { layout: { hierarchical: { enabled: false } },
+      physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -100, springLength: 180 },
+        stabilization: { iterations: 300 } },
+      nodes: hierOpts.nodes, edges: Object.assign({}, hierOpts.edges, { smooth: { type: 'continuous' } }),
+      interaction: hierOpts.interaction };
+
+    var network = new vis.Network(container, data, hierOpts);
+    function toggleLayout() { hierarchical = !hierarchical; network.setOptions(hierarchical ? hierOpts : forceOpts); }
+    function togglePhysics() { physicsOn = !physicsOn; network.setOptions({ physics: { enabled: physicsOn } }); }
+    function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // Click to show details
+    network.on('click', function(params) {
+      var panel = document.getElementById('details');
+      if (params.nodes.length > 0) {
+        var nodeId = params.nodes[0];
+        var node = nodes.get(nodeId);
+        var props = node.properties || {};
+        var cn = props.companyNumber || '';
+        var h = '<h4>' + escHtml(node.group || '') + '</h4>';
+        if (cn && node.group === 'Company') {
+          h += '<button class="expand-btn" onclick="expandCompany(\'' + escHtml(cn) + '\')">Expand ownership tree</button>';
+        }
+        h += '<table>';
+        Object.keys(props).forEach(function(key) {
+          h += '<tr><td>' + escHtml(key) + '</td><td>' + escHtml(props[key]) + '</td></tr>';
+        });
+        h += '</table>';
+        panel.innerHTML = h;
+        panel.style.display = 'block';
+      } else { panel.style.display = 'none'; }
+    });
+
+    // Double-click to expand
+    network.on('doubleClick', function(params) {
+      if (params.nodes.length > 0) {
+        var node = nodes.get(params.nodes[0]);
+        var cn = (node.properties || {}).companyNumber;
+        if (cn && node.group === 'Company') expandCompany(cn);
+      }
+    });
+
+    var expanding = {};
+    function expandCompany(cn) {
+      if (expanding[cn]) return;
+      expanding[cn] = true;
+      setStatus('Expanding ' + cn + '...');
+      fetch('/api/expand?company=' + encodeURIComponent(cn))
+        .then(function(r) { return r.json(); })
+        .then(function(d) { mergeData(d); expanding[cn] = false; setStatus('Expanded ' + cn, 'done'); })
+        .catch(function(e) { expanding[cn] = false; setStatus('Error: ' + e, 'error'); });
+    }
+
+    function mergeData(d) {
+      var added = 0;
+      (d.nodes || []).forEach(function(n) { if (!nodes.get(n.id)) { nodes.add(n); added++; } });
+      var existing = edges.get();
+      (d.edges || []).forEach(function(e) {
+        var dup = existing.some(function(ex) { return ex.from === e.from && ex.to === e.to && ex.label === e.label; });
+        if (!dup) { edges.add(e); added++; }
+      });
+      updateStats();
+      if (added > 0) network.fit({ animation: true });
+    }
+
+    function updateStats() {
+      document.getElementById('stats').textContent = nodes.length + ' nodes, ' + edges.length + ' edges';
+    }
+
+    function setStatus(msg, cls) {
+      var el = document.getElementById('status');
+      el.className = cls || '';
+      el.textContent = msg;
+    }
+
+    // Stream data from server via SSE
+    var evtSource = new EventSource('/api/stream?company={{ company }}');
+    evtSource.addEventListener('status', function(e) { setStatus(e.data); });
+    evtSource.addEventListener('data', function(e) {
+      var d = JSON.parse(e.data);
+      mergeData(d);
+    });
+    evtSource.addEventListener('done', function(e) {
+      setStatus(e.data || 'Complete', 'done');
+      updateStats();
+      evtSource.close();
+    });
+    evtSource.addEventListener('error_msg', function(e) {
+      setStatus(e.data, 'error');
+      evtSource.close();
+    });
+    evtSource.onerror = function() { evtSource.close(); };
+  </script>
+</body>
+</html>"""
+
+
 @app.route("/graph")
 def graph():
     company = request.args.get("company", "").strip().upper()
     if not company:
         return redirect(url_for("home"))
+    return render_template_string(GRAPH_PAGE_TEMPLATE, company=company)
 
-    exports_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exports")
-    html_path = os.path.join(exports_dir, f"export_{company}.html")
 
-    # If export already exists and is recent (< 1 day), serve it
-    if os.path.exists(html_path):
-        age_hours = (time.time() - os.path.getmtime(html_path)) / 3600
-        if age_hours < 24:
-            return send_from_directory(exports_dir, f"export_{company}.html")
+@app.route("/api/stream")
+def api_stream():
+    """SSE endpoint that streams graph data as it's built."""
+    company = request.args.get("company", "").strip().upper()
+    if not company:
+        return "Missing company", 400
 
-    # Otherwise, generate it
-    d = get_driver()
+    from flask import Response
 
-    # Check the company exists
-    with d.session() as session:
-        result = session.run(
-            "MATCH (c:Company {companyNumber: $cn}) RETURN c.name AS name",
-            cn=company,
-        )
-        record = result.single()
-        if not record:
-            return redirect(url_for("home", error=f"Company {company} not found"))
+    def generate():
+        import json as _json
 
-    # Fetch directors if API key available
-    if CH_API_KEY:
-        _ensure_directors(d, company)
+        def send(event, data):
+            return f"event: {event}\ndata: {data}\n\n"
 
-    # Run ownership tree query
-    query = (
-        f"MATCH (c:Company {{companyNumber: '{company}'}}) "
-        f"CALL apoc.path.expandConfig(c, {{"
-        f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
-        f"  minLevel: 1, maxLevel: 30, "
-        f"  uniqueness: 'NODE_GLOBAL'"
-        f"}}) YIELD path "
-        f"RETURN path"
-    )
+        d = get_driver()
 
-    with d.session() as session:
-        result = session.run(query)
-        records = list(result)
+        # 1. Check company exists
+        yield send("status", f"Looking up {company}...")
+        with d.session() as session:
+            result = session.run(
+                "MATCH (c:Company {companyNumber: $cn}) RETURN c.name AS name", cn=company
+            )
+            record = result.single()
+            if not record:
+                yield send("error_msg", f"Company {company} not found in database")
+                return
+        yield send("status", f"Found: {record['name']}")
 
-        # Also get directors
-        dir_query = (
+        # 2. Ownership tree
+        yield send("status", "Querying ownership tree...")
+        query = (
             f"MATCH (c:Company {{companyNumber: '{company}'}}) "
             f"CALL apoc.path.expandConfig(c, {{"
             f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
-            f"  minLevel: 0, maxLevel: 30, "
+            f"  minLevel: 1, maxLevel: 30, "
             f"  uniqueness: 'NODE_GLOBAL'"
-            f"}}) YIELD path "
-            f"UNWIND nodes(path) AS n "
-            f"WITH n WHERE n:Company "
-            f"MATCH dirPath = (d:Director)-[:OFFICER_OF]->(n) "
-            f"RETURN dirPath AS path"
+            f"}}) YIELD path RETURN path"
         )
-        dir_result = session.run(dir_query)
-        dir_records = list(dir_result)
-        records.extend(dir_records)
+        with d.session() as session:
+            records = list(session.run(query))
 
-        # If no tree data, at least get the company node + direct PSCs + directors
-        if not records:
-            fallback = session.run(
-                "MATCH (c:Company {companyNumber: $cn}) "
-                "OPTIONAL MATCH path1 = (psc)-[:HAS_SIGNIFICANT_CONTROL]->(c) "
-                "OPTIONAL MATCH path2 = (d:Director)-[:OFFICER_OF]->(c) "
-                "RETURN c, path1, path2",
-                cn=company,
+        if records:
+            nodes_data, rels_data, _ = extract_graph_data(records)
+            vis = _build_vis_data(nodes_data, rels_data)
+            yield send("data", _json.dumps(vis, default=str))
+            yield send("status", f"Ownership tree: {len(vis['nodes'])} nodes")
+        else:
+            # Fallback: direct PSCs
+            yield send("status", "No ownership chain — loading direct PSCs...")
+            with d.session() as session:
+                fallback = list(session.run(
+                    "MATCH (c:Company {companyNumber: $cn}) "
+                    "OPTIONAL MATCH path1 = (psc)-[:HAS_SIGNIFICANT_CONTROL]->(c) "
+                    "RETURN c, path1", cn=company
+                ))
+            if fallback:
+                nodes_data, rels_data, _ = extract_graph_data(fallback)
+                vis = _build_vis_data(nodes_data, rels_data)
+                yield send("data", _json.dumps(vis, default=str))
+
+        # 3. Fetch directors from API if needed
+        if CH_API_KEY:
+            yield send("status", "Fetching director data from Companies House API...")
+            try:
+                _ensure_directors(d, company)
+            except Exception as e:
+                yield send("status", f"Director fetch warning: {e}")
+
+            # 4. Query directors
+            yield send("status", "Loading directors...")
+            dir_query = (
+                f"MATCH (c:Company {{companyNumber: '{company}'}}) "
+                f"CALL apoc.path.expandConfig(c, {{"
+                f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY', "
+                f"  minLevel: 0, maxLevel: 30, "
+                f"  uniqueness: 'NODE_GLOBAL'"
+                f"}}) YIELD path "
+                f"UNWIND nodes(path) AS n WITH n WHERE n:Company "
+                f"MATCH dirPath = (dd:Director)-[:OFFICER_OF]->(n) "
+                f"RETURN dirPath AS path"
             )
-            records = list(fallback)
+            with d.session() as session:
+                dir_records = list(session.run(dir_query))
 
-    if not records:
-        return redirect(url_for("home", error=f"No ownership data found for {company}"))
+            if not dir_records:
+                # Fallback for single company
+                with d.session() as session:
+                    dir_records = list(session.run(
+                        "MATCH dirPath = (dd:Director)-[:OFFICER_OF]->(c:Company {companyNumber: $cn}) "
+                        "RETURN dirPath AS path", cn=company
+                    ))
 
-    nodes, rels, flat_rows = extract_graph_data(records)
+            if dir_records:
+                nodes_data, rels_data, _ = extract_graph_data(dir_records)
+                vis = _build_vis_data(nodes_data, rels_data)
+                yield send("data", _json.dumps(vis, default=str))
+                yield send("status", f"Loaded {len(vis['nodes'])} directors")
 
-    os.makedirs(exports_dir, exist_ok=True)
-    export_html(nodes, rels, flat_rows, html_path)
+        yield send("done", "Complete")
 
-    # Also save JSON
-    import json
-    json_path = os.path.join(exports_dir, f"export_{company}.json")
-    json_data = {"nodes": list(nodes.values()), "relationships": rels}
-    with open(json_path, "w") as f:
-        json.dump(json_data, f, indent=2, default=str)
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
-    return send_from_directory(exports_dir, f"export_{company}.html")
+
+def _build_vis_data(nodes, rels):
+    """Convert extracted graph data to vis-network compatible JSON."""
+    label_colors = {
+        "Company": "#4C8BF5", "Person": "#34A853", "CorporateEntity": "#FBBC04",
+        "LegalPerson": "#EA4335", "Director": "#00BCD4", "SICCode": "#9C27B0", "Address": "#607D8B",
+    }
+    node_sizes = {
+        "Company": 25, "Person": 15, "CorporateEntity": 20,
+        "LegalPerson": 18, "Director": 15, "SICCode": 12, "Address": 12,
+    }
+    node_shapes = {
+        "Company": "dot", "Person": "diamond", "CorporateEntity": "square",
+        "LegalPerson": "triangle", "Director": "triangleDown", "SICCode": "star", "Address": "hexagon",
+    }
+
+    # Merge CorporateEntity -> Company
+    ce_to_company = {}
+    for r in rels:
+        if r["type"] == "IS_COMPANY":
+            ce_id, co_id = r["startId"], r["endId"]
+            if ce_id in nodes and co_id in nodes:
+                if "CorporateEntity" in nodes[ce_id]["labels"] and "Company" in nodes[co_id]["labels"]:
+                    ce_to_company[ce_id] = co_id
+    merged_nodes = {nid: n for nid, n in nodes.items() if nid not in ce_to_company}
+    def remap(nid):
+        return ce_to_company.get(nid, nid)
+    merged_rels = []
+    for r in rels:
+        if r["type"] == "IS_COMPANY" and r["startId"] in ce_to_company:
+            continue
+        merged_rels.append({"startId": remap(r["startId"]), "endId": remap(r["endId"]),
+                            "type": r["type"], "properties": r["properties"]})
+
+    seen_edges = set()
+    vis_nodes = []
+    for n in merged_nodes.values():
+        label = n["labels"][0] if n["labels"] else "Unknown"
+        props = n["properties"]
+        display = props.get("name", props.get("companyNumber", str(n["id"])))
+        if isinstance(display, str) and len(display) > 30:
+            display = display[:27] + "..."
+        cn = props.get("companyNumber", "")
+        if label == "Company" and cn:
+            display = f"{display}\n({cn})"
+        safe_props = {}
+        for k, v in props.items():
+            safe_props[k] = str(v) if not isinstance(v, list) else ", ".join(str(x) for x in v)
+        vis_nodes.append({
+            "id": n["id"], "label": display, "title": props.get("name", ""),
+            "color": label_colors.get(label, "#999"), "group": label,
+            "size": node_sizes.get(label, 15), "shape": node_shapes.get(label, "dot"),
+            "properties": safe_props,
+        })
+
+    def edge_color(rel_type, noc_list):
+        if rel_type == "OFFICER_OF": return "#00BCD4", 2.0
+        if not noc_list: return "#666", 1.5
+        noc_str = " ".join(noc_list) if isinstance(noc_list, list) else str(noc_list)
+        if "75-to-100" in noc_str: return "#e74c3c", 3.5
+        elif "50-to-75" in noc_str: return "#e67e22", 2.5
+        elif "25-to-50" in noc_str: return "#f1c40f", 2.0
+        elif "right-to-appoint" in noc_str: return "#9b59b6", 2.0
+        elif "significant-influence" in noc_str: return "#3498db", 2.0
+        return "#95a5a6", 1.5
+
+    vis_edges = []
+    for r in merged_rels:
+        ek = (r["startId"], r["endId"], r["type"])
+        if ek in seen_edges: continue
+        seen_edges.add(ek)
+        noc_raw = r["properties"].get("naturesOfControl", [])
+        col, width = edge_color(r["type"], noc_raw)
+        if isinstance(noc_raw, list):
+            noc = ", ".join(
+                x.replace("ownership-of-shares-", "shares:").replace("voting-rights-", "votes:")
+                 .replace("right-to-appoint-and-remove-directors", "appoint dirs")
+                 .replace("significant-influence-or-control", "sig. control")
+                 .replace("-as-firm", " (firm)").replace("-as-trust", " (trust)")
+                for x in noc_raw)
+        else:
+            noc = str(noc_raw)
+        elabel = r["type"].replace("HAS_SIGNIFICANT_CONTROL", "CONTROLS").replace("OFFICER_OF", "DIRECTOR").replace("_", " ")
+        vis_edges.append({"from": r["startId"], "to": r["endId"], "label": elabel,
+                          "title": noc or r["type"], "arrows": "to",
+                          "color": {"color": col, "highlight": "#fff", "hover": col}, "width": width})
+
+    return {"nodes": vis_nodes, "edges": vis_edges}
 
 
 @app.route("/exports/<path:filename>")
