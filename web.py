@@ -531,6 +531,15 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         if (eid) entityToNodeId[eid] = n.id;
       });
 
+      // Map Director name -> existing Director node ID for dedup
+      var dirNameToNodeId = {};
+      nodes.get().forEach(function(n) {
+        if (n.group === 'Director') {
+          var name = ((n.properties || {}).name || '').toUpperCase().trim();
+          if (name) dirNameToNodeId[name] = n.id;
+        }
+      });
+
       // Remap table: new node ID -> existing node ID (for merging)
       var remap = {};
 
@@ -576,6 +585,16 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
           if (eid && entityToNodeId[eid]) {
             remap[n.id] = entityToNodeId[eid];
             return;
+          }
+
+          // Check if this Director already exists by name
+          if (n.group === 'Director') {
+            var dname = ((n.properties || {}).name || '').toUpperCase().trim();
+            if (dname && dirNameToNodeId[dname]) {
+              remap[n.id] = dirNameToNodeId[dname];
+              return;
+            }
+            if (dname) dirNameToNodeId[dname] = n.id;
           }
 
           // If existing graph uses levels but this node doesn't have one, assign one
