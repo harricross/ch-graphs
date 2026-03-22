@@ -546,6 +546,15 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         }
       });
 
+      // Map Person name -> existing Person node ID for dedup
+      var personNameToNodeId = {};
+      nodes.get().forEach(function(n) {
+        if (n.group === 'Person') {
+          var name = ((n.properties || {}).name || '').toUpperCase().trim();
+          if (name) personNameToNodeId[name] = n.id;
+        }
+      });
+
       // Remap table: new node ID -> existing node ID (for merging)
       var remap = {};
 
@@ -608,6 +617,16 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
               return;
             }
             if (dname) dirNameToNodeId[dname] = n.id;
+          }
+
+          // Check if this Person already exists by name
+          if (n.group === 'Person') {
+            var pname = ((n.properties || {}).name || '').toUpperCase().trim();
+            if (pname && personNameToNodeId[pname]) {
+              remap[n.id] = personNameToNodeId[pname];
+              return;
+            }
+            if (pname) personNameToNodeId[pname] = n.id;
           }
 
           // If existing graph uses levels but this node doesn't have one, assign one
