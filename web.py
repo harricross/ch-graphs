@@ -280,7 +280,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <span class="legend-item"><span class="legend-line" style="background:#78909C"></span>Secretary</span>
     </div>
     <div class="btn-row">
-      <button class="btn" id="layoutBtn" onclick="toggleLayout()">Layout: Tree</button>
+      <button class="btn" onclick="toggleLayout()">Re-layout</button>
       <button class="btn" onclick="network.fit()">Fit View</button>
       <button class="btn" id="autoBtn" onclick="autoResolve()">Auto-resolve all</button>
       <label style="font-size:11px; color:#888; margin-left:4px;">Max: <input type="number" id="autoMax" value="200" min="10" max="5000" style="width:55px; background:#1a1a2e; color:#eee; border:1px solid #4a4a7a; border-radius:3px; padding:2px 4px; font-size:11px;"></label>
@@ -296,35 +296,31 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     var edges = new vis.DataSet();
     var container = document.getElementById('graph');
     var data = { nodes: nodes, edges: edges };
-    var hierarchical = true;
+    // Positions computed server-side, no physics needed initially
 
-    var hierOpts = {
-      layout: { hierarchical: { enabled: true, direction: 'UD', sortMethod: 'directed',
-        levelSeparation: 150, nodeSpacing: 250, treeSpacing: 250 } },
-      physics: { enabled: true, hierarchicalRepulsion: { centralGravity: 0.0,
-        springLength: 150, springConstant: 0.01, nodeDistance: 200, damping: 0.09 },
-        stabilization: { iterations: 300 } },
+    var defaultOpts = {
+      layout: { hierarchical: { enabled: false } },
+      physics: { enabled: false },
       nodes: { font: { color: '#eee', size: 10, multi: 'md', face: 'arial' },
         borderWidth: 2, widthConstraint: { maximum: 150 } },
       edges: { color: { color: '#666', highlight: '#fff', hover: '#aaa' },
         font: { size: 0 },
-        smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 }, width: 1.5 },
-      interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true }
+        smooth: { type: 'curvedCW', roundness: 0.15 }, width: 1.5 },
+      interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true,
+        zoomView: true, dragView: true, dragNodes: true }
     };
-    var forceOpts = { layout: { hierarchical: { enabled: false } },
-      physics: { solver: 'barnesHut', barnesHut: { gravitationalConstant: -8000, springLength: 300, springConstant: 0.01, damping: 0.3, avoidOverlap: 0.5 },
-        stabilization: { iterations: 300 } },
-      nodes: hierOpts.nodes, edges: Object.assign({}, hierOpts.edges, { smooth: { type: 'continuous' } }),
-      interaction: hierOpts.interaction };
+    var physicsOpts = Object.assign({}, defaultOpts, {
+      physics: { enabled: true, solver: 'barnesHut',
+        barnesHut: { gravitationalConstant: -15000, springLength: 400, springConstant: 0.005, damping: 0.3, avoidOverlap: 0.8 },
+        stabilization: { iterations: 400 } }
+    });
 
-    var network = new vis.Network(container, data, hierOpts);
-    // Auto-disable physics after stabilization so nodes stay in place
-    network.on('stabilizationIterationsDone', function() { network.setOptions({ physics: { enabled: false } }); });
+    var network = new vis.Network(container, data, defaultOpts);
+    // Toggle re-layouts with physics then freezes
     function toggleLayout() {
-      hierarchical = !hierarchical;
-      network.setOptions(hierarchical ? hierOpts : forceOpts);
-      var btn = document.getElementById('layoutBtn');
-      btn.textContent = hierarchical ? 'Layout: Tree' : 'Layout: Force';
+      // Re-run physics to re-layout, then freeze
+      network.setOptions(physicsOpts);
+      network.once('stabilizationIterationsDone', function() { network.setOptions({ physics: { enabled: false } }); });
     }
     var dormantHidden = false;
     function toggleDormant() {
@@ -461,8 +457,87 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
 
         panel.innerHTML = h;
         panel.style.display = 'block';
-      } else { panel.style.display = 'none'; }
+
+        // Highlight neighbourhood: fade out nodes beyond 4 hops + path to root
+        highlightNeighbourhood(nodeId, 4);
+      } else {
+        panel.style.display = 'none';
+        resetHighlight();
+      }
     });
+
+    var highlightActive = false;
+    function highlightNeighbourhood(centerId, maxHops) {
+      var allEdges = edges.get();
+      // BFS to find all nodes within maxHops
+      var nearby = {};
+      nearby[centerId] = true;
+      var queue = [{ id: centerId, depth: 0 }];
+      while (queue.length > 0) {
+        var cur = queue.shift();
+        if (cur.depth >= maxHops) continue;
+        allEdges.forEach(function(e) {
+          var neighbor = null;
+          if (e.from === cur.id) neighbor = e.to;
+          else if (e.to === cur.id) neighbor = e.from;
+          if (neighbor && !nearby[neighbor]) {
+            nearby[neighbor] = true;
+            queue.push({ id: neighbor, depth: cur.depth + 1 });
+          }
+        });
+      }
+      // Also include path to root
+      if (rootNodeId && !nearby[rootNodeId]) {
+        var visited = {};
+        var parent = {};
+        var bfsQ = [centerId];
+        visited[centerId] = true;
+        var found = false;
+        while (bfsQ.length > 0 && !found) {
+          var c = bfsQ.shift();
+          for (var i = 0; i < allEdges.length; i++) {
+            var e = allEdges[i];
+            var nb = null;
+            if (e.from === c) nb = e.to;
+            else if (e.to === c) nb = e.from;
+            if (nb && !visited[nb]) {
+              visited[nb] = true;
+              parent[nb] = c;
+              if (nb === rootNodeId) { found = true; break; }
+              bfsQ.push(nb);
+            }
+          }
+        }
+        if (found) {
+          var p = rootNodeId;
+          while (p && p !== centerId) { nearby[p] = true; p = parent[p]; }
+        }
+      }
+      // Apply opacity
+      var nodeUpdates = [];
+      var edgeUpdates = [];
+      nodes.get().forEach(function(n) {
+        var inSet = nearby[n.id];
+        nodeUpdates.push({ id: n.id, opacity: inSet ? 1.0 : 0.15 });
+      });
+      allEdges.forEach(function(e) {
+        var inSet = nearby[e.from] && nearby[e.to];
+        edgeUpdates.push({ id: e.id, hidden: !inSet });
+      });
+      nodes.update(nodeUpdates);
+      edges.update(edgeUpdates);
+      highlightActive = true;
+    }
+    function resetHighlight() {
+      if (!highlightActive) return;
+      var nodeUpdates = [];
+      var edgeUpdates = [];
+      nodes.get().forEach(function(n) { nodeUpdates.push({ id: n.id, opacity: 1.0 }); });
+      edges.get().forEach(function(e) { edgeUpdates.push({ id: e.id, hidden: false }); });
+      nodes.update(nodeUpdates);
+      edges.update(edgeUpdates);
+      highlightActive = false;
+    }
 
     // Double-click to expand
     network.on('doubleClick', function(params) {
@@ -677,11 +752,6 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       });
       updateStats();
       if (added > 0) {
-        // Auto-switch to force layout when graph gets large
-        if (hierarchical && nodes.length > 50) {
-          hierarchical = false;
-          network.setOptions(forceOpts);
-        }
         network.fit({ animation: true });
       }
     }
@@ -751,7 +821,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     function autoResolve() {
       if (autoRunning) { autoRunning = false; document.getElementById('autoBtn').textContent = 'Auto-resolve all'; return; }
       // Switch to force layout for large auto-resolved graphs
-      if (hierarchical) { hierarchical = false; network.setOptions(forceOpts); }
+      // Positions will be computed server-side for each expand call
       autoRunning = true;
       document.getElementById('autoBtn').textContent = 'Stop auto-resolve';
       autoStep();
@@ -1173,7 +1243,96 @@ def _build_vis_data(nodes, rels):
                           "title": tooltip, "arrows": "to",
                           "color": {"color": col, "highlight": "#fff", "hover": col}, "width": width})
 
+    # Compute positions server-side
+    _compute_positions(vis_nodes, vis_edges)
+
     return {"nodes": vis_nodes, "edges": vis_edges}
+
+
+def _compute_positions(vis_nodes, vis_edges):
+    """Assign x/y positions to nodes for a clean layout.
+    Companies arranged vertically by hierarchy level.
+    Directors/Persons spread horizontally around their connected company."""
+    import math
+
+    # Build adjacency: node_id -> list of connected company node_ids
+    company_ids = set()
+    node_by_id = {}
+    for n in vis_nodes:
+        node_by_id[n["id"]] = n
+        if n["group"] == "Company":
+            company_ids.add(n["id"])
+
+    # Map non-company nodes to their connected company
+    node_to_companies = {}  # node_id -> [company_id]
+    for e in vis_edges:
+        src, dst = e.get("from"), e.get("to")
+        if dst in company_ids and src not in company_ids:
+            node_to_companies.setdefault(src, []).append(dst)
+        if src in company_ids and dst not in company_ids:
+            node_to_companies.setdefault(dst, []).append(src)
+
+    # Group companies by level
+    level_companies = {}  # level -> [company_id]
+    for n in vis_nodes:
+        if n["id"] in company_ids:
+            lvl = n.get("level", 0) or 0
+            level_companies.setdefault(lvl, []).append(n["id"])
+
+    if not level_companies:
+        return
+
+    # Layout companies: spread horizontally per level, levels go top to bottom
+    X_SPACING = 400
+    Y_SPACING = 350
+    SATELLITE_RADIUS = 180
+
+    sorted_levels = sorted(level_companies.keys())
+    company_positions = {}  # company_id -> (x, y)
+
+    for lvl in sorted_levels:
+        companies = level_companies[lvl]
+        y = lvl * Y_SPACING
+        total_width = (len(companies) - 1) * X_SPACING
+        start_x = -total_width / 2
+        for i, cid in enumerate(companies):
+            x = start_x + i * X_SPACING
+            company_positions[cid] = (x, y)
+            node_by_id[cid]["x"] = x
+            node_by_id[cid]["y"] = y
+            node_by_id[cid]["fixed"] = {"x": True, "y": True}
+
+    # Layout satellite nodes (Directors, Persons, etc.) around their company
+    company_satellites = {}  # company_id -> [node_id]
+    orphans = []
+    for n in vis_nodes:
+        if n["id"] in company_ids:
+            continue
+        companies = node_to_companies.get(n["id"], [])
+        if companies:
+            # Attach to first connected company
+            company_satellites.setdefault(companies[0], []).append(n["id"])
+        else:
+            orphans.append(n["id"])
+
+    for cid, sats in company_satellites.items():
+        cx, cy = company_positions.get(cid, (0, 0))
+        count = len(sats)
+        for i, sid in enumerate(sats):
+            angle = (2 * math.pi * i / count) - math.pi / 2  # start from top
+            sx = cx + SATELLITE_RADIUS * math.cos(angle)
+            sy = cy + SATELLITE_RADIUS * math.sin(angle)
+            node_by_id[sid]["x"] = sx
+            node_by_id[sid]["y"] = sy
+
+    # Place orphans in a row below everything
+    if orphans:
+        max_y = max(pos[1] for pos in company_positions.values()) if company_positions else 0
+        orphan_y = max_y + Y_SPACING
+        total_w = (len(orphans) - 1) * 150
+        for i, oid in enumerate(orphans):
+            node_by_id[oid]["x"] = -total_w / 2 + i * 150
+            node_by_id[oid]["y"] = orphan_y
 
 
 @app.route("/exports/<path:filename>")
