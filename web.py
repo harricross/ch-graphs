@@ -287,6 +287,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <div id="autoStatus" style="font-size:11px; color:#888; margin-top:4px;"></div>
       <button class="btn" id="formerBtn" onclick="toggleFormer()">Former Officers: Off</button>
       <button class="btn" id="dormantBtn" onclick="toggleDormant()">Dormant: Shown</button>
+      <button class="btn active" id="directorsBtn" onclick="toggleDirectors()">Directors: Hidden</button>
     </div>
   </div>
   <div id="details"></div>
@@ -338,6 +339,41 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       var btn = document.getElementById('dormantBtn');
       btn.textContent = dormantHidden ? 'Dormant: Hidden' : 'Dormant: Shown';
       btn.classList.toggle('active', dormantHidden);
+    }
+    var directorsHidden = true;  // hidden by default
+    function toggleDirectors() {
+      directorsHidden = !directorsHidden;
+      nodes.get().forEach(function(n) {
+        if (n.group === 'Director') {
+          nodes.update({ id: n.id, hidden: directorsHidden });
+        }
+      });
+      // Also hide/show edges connected to Directors
+      edges.get().forEach(function(e) {
+        var fromNode = nodes.get(e.from);
+        var toNode = nodes.get(e.to);
+        if ((fromNode && fromNode.group === 'Director') || (toNode && toNode.group === 'Director')) {
+          edges.update({ id: e.id, hidden: directorsHidden });
+        }
+      });
+      var btn = document.getElementById('directorsBtn');
+      btn.textContent = directorsHidden ? 'Directors: Hidden' : 'Directors: Shown';
+      btn.classList.toggle('active', directorsHidden);
+    }
+    // Auto-hide directors when new data arrives
+    function hideDirectorsIfNeeded() {
+      if (!directorsHidden) return;
+      nodes.get().forEach(function(n) {
+        if (n.group === 'Director' && !n.hidden) {
+          nodes.update({ id: n.id, hidden: true });
+        }
+      });
+      edges.get().forEach(function(e) {
+        var fromNode = nodes.get(e.from);
+        if (fromNode && fromNode.group === 'Director' && !e.hidden) {
+          edges.update({ id: e.id, hidden: true });
+        }
+      });
     }
     function toggleFormer() {
       var url = new URL(window.location);
@@ -772,6 +808,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
 
     function updateStats() {
       document.getElementById('stats').textContent = nodes.length + ' nodes, ' + edges.length + ' edges';
+      hideDirectorsIfNeeded();
       // Track root node
       if (!rootNodeId) {
         var allN = nodes.get();
