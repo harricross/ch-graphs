@@ -1307,26 +1307,51 @@ def _compute_positions(vis_nodes, vis_edges):
                 node_by_id[cid]["y"] = y_offset
             y_offset += Y_SPACING
 
-    # Layout satellite nodes (Directors, Persons, etc.) around their company
-    company_satellites = {}  # company_id -> [node_id]
+    # Layout satellite nodes (Directors, Persons, etc.)
+    # Multi-company satellites placed at centroid of their companies
+    # Single-company satellites orbit around their company
+    placed_satellites = set()
     orphans = []
+
     for n in vis_nodes:
         if n["id"] in company_ids:
             continue
         companies = node_to_companies.get(n["id"], [])
-        if companies:
-            # Attach to first connected company
-            company_satellites.setdefault(companies[0], []).append(n["id"])
+        positioned_companies = [c for c in companies if c in company_positions]
+
+        if len(positioned_companies) > 1:
+            # Place at centroid of connected companies
+            cx = sum(company_positions[c][0] for c in positioned_companies) / len(positioned_companies)
+            cy = sum(company_positions[c][1] for c in positioned_companies) / len(positioned_companies)
+            # Offset slightly to avoid overlap with company nodes
+            node_by_id[n["id"]]["x"] = cx + 50
+            node_by_id[n["id"]]["y"] = cy - 80
+            placed_satellites.add(n["id"])
+        elif len(positioned_companies) == 1:
+            # Will be placed in orbit below
+            pass
         else:
             orphans.append(n["id"])
+
+    # Orbit single-company satellites
+    company_satellites = {}
+    for n in vis_nodes:
+        if n["id"] in company_ids or n["id"] in placed_satellites or n["id"] in set(orphans):
+            continue
+        companies = node_to_companies.get(n["id"], [])
+        positioned = [c for c in companies if c in company_positions]
+        if positioned:
+            company_satellites.setdefault(positioned[0], []).append(n["id"])
 
     for cid, sats in company_satellites.items():
         cx, cy = company_positions.get(cid, (0, 0))
         count = len(sats)
+        # Scale radius with satellite count so they don't overlap
+        radius = SATELLITE_RADIUS + max(0, (count - 4) * 20)
         for i, sid in enumerate(sats):
-            angle = (2 * math.pi * i / count) - math.pi / 2  # start from top
-            sx = cx + SATELLITE_RADIUS * math.cos(angle)
-            sy = cy + SATELLITE_RADIUS * math.sin(angle)
+            angle = (2 * math.pi * i / count) - math.pi / 2
+            sx = cx + radius * math.cos(angle)
+            sy = cy + radius * math.sin(angle)
             node_by_id[sid]["x"] = sx
             node_by_id[sid]["y"] = sy
 
