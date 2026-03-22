@@ -1510,28 +1510,16 @@ def _ensure_directors(d, company_number):
 
 
 def _ownership_query(company, direction="both"):
-    """Build the ownership tree Cypher query.
-    direction: 'up' = who controls this company, 'down' = what it controls, 'both' """
-    if direction == "both":
-        # Upward: who controls this company (PSC -> Company), following IS_COMPANY cross-refs
-        return (
-            f"MATCH (c:Company {{companyNumber: '{company}'}}) "
-            f"CALL apoc.path.expandConfig(c, {{"
-            f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY>', "
-            f"  minLevel: 1, maxLevel: 30, "
-            f"  uniqueness: 'NODE_GLOBAL'"
-            f"}}) YIELD path RETURN path"
-        )
-    else:
-        # Upward only (who controls this company)
-        return (
-            f"MATCH (c:Company {{companyNumber: '{company}'}}) "
-            f"CALL apoc.path.expandConfig(c, {{"
-            f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY>', "
-            f"  minLevel: 1, maxLevel: 30, "
-            f"  uniqueness: 'NODE_GLOBAL'"
-            f"}}) YIELD path RETURN path"
-        )
+    """Build the ownership tree Cypher query."""
+    return (
+        f"MATCH (c:Company {{companyNumber: '{company}'}}) "
+        f"CALL apoc.path.expandConfig(c, {{"
+        f"  relationshipFilter: '<HAS_SIGNIFICANT_CONTROL, IS_COMPANY>', "
+        f"  minLevel: 1, maxLevel: 15, "
+        f"  uniqueness: 'NODE_GLOBAL', "
+        f"  limit: 200"
+        f"}}) YIELD path RETURN path"
+    )
 
 
 def _directors_query(company, include_former=False):
