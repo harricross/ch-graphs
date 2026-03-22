@@ -272,6 +272,17 @@ def graph():
         dir_records = list(dir_result)
         records.extend(dir_records)
 
+        # If no tree data, at least get the company node + direct PSCs + directors
+        if not records:
+            fallback = session.run(
+                "MATCH (c:Company {companyNumber: $cn}) "
+                "OPTIONAL MATCH path1 = (psc)-[:HAS_SIGNIFICANT_CONTROL]->(c) "
+                "OPTIONAL MATCH path2 = (d:Director)-[:OFFICER_OF]->(c) "
+                "RETURN c, path1, path2",
+                cn=company,
+            )
+            records = list(fallback)
+
     if not records:
         return redirect(url_for("home", error=f"No ownership data found for {company}"))
 
