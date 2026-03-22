@@ -312,7 +312,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true }
     };
     var forceOpts = { layout: { hierarchical: { enabled: false } },
-      physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -200, springLength: 250, springConstant: 0.02, damping: 0.4 },
+      physics: { solver: 'barnesHut', barnesHut: { gravitationalConstant: -8000, springLength: 300, springConstant: 0.01, damping: 0.3, avoidOverlap: 0.5 },
         stabilization: { iterations: 300 } },
       nodes: hierOpts.nodes, edges: Object.assign({}, hierOpts.edges, { smooth: { type: 'continuous' } }),
       interaction: hierOpts.interaction };
