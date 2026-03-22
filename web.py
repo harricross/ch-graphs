@@ -1246,6 +1246,15 @@ def _build_vis_data(nodes, rels):
         for dup_id in person_dedup:
             merged_nodes.pop(dup_id, None)
 
+    # Remove orphaned nodes (no remaining edges after filters)
+    connected_ids = set()
+    for r in merged_rels:
+        connected_ids.add(r["startId"])
+        connected_ids.add(r["endId"])
+    # Keep Company nodes even if orphaned (they're the anchor)
+    merged_nodes = {nid: n for nid, n in merged_nodes.items()
+                    if nid in connected_ids or "Company" in n["labels"]}
+
     # Compute hierarchy levels
     levels = _compute_levels(merged_nodes, merged_rels)
 
