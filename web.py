@@ -1013,6 +1013,40 @@ def _build_vis_data(nodes, rels):
         # Mark merged persons as dual-role
         dual_person_ids = set(dir_to_person.values())
 
+    # Dedup Directors with same name (same person as officer of multiple companies)
+    dir_name_to_id = {}  # normalized name -> first director node id
+    dir_dedup = {}  # duplicate id -> canonical id
+    for nid, n in list(merged_nodes.items()):
+        if "Director" in n["labels"]:
+            dname = _norm_name(n["properties"].get("name", ""))
+            if dname in dir_name_to_id:
+                dir_dedup[nid] = dir_name_to_id[dname]
+            else:
+                dir_name_to_id[dname] = nid
+    if dir_dedup:
+        merged_rels = [{"startId": dir_dedup.get(r["startId"], r["startId"]),
+                        "endId": r["endId"], "type": r["type"], "properties": r["properties"]}
+                       for r in merged_rels]
+        for dup_id in dir_dedup:
+            merged_nodes.pop(dup_id, None)
+
+    # Also dedup Persons with same personId
+    person_id_to_nid = {}
+    person_dedup = {}
+    for nid, n in list(merged_nodes.items()):
+        if "Person" in n["labels"]:
+            pid = n["properties"].get("personId", "")
+            if pid and pid in person_id_to_nid:
+                person_dedup[nid] = person_id_to_nid[pid]
+            elif pid:
+                person_id_to_nid[pid] = nid
+    if person_dedup:
+        merged_rels = [{"startId": person_dedup.get(r["startId"], r["startId"]),
+                        "endId": r["endId"], "type": r["type"], "properties": r["properties"]}
+                       for r in merged_rels]
+        for dup_id in person_dedup:
+            merged_nodes.pop(dup_id, None)
+
     # Compute hierarchy levels
     levels = _compute_levels(merged_nodes, merged_rels)
 
