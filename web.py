@@ -307,7 +307,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
         font: { size: 0 },
         smooth: { type: 'curvedCW', roundness: 0.15 }, width: 1.5 },
       interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true,
-        zoomView: true, dragView: true, dragNodes: true }
+        zoomView: true, dragView: true, dragNodes: true, zoomSpeed: 1 }
     };
     var physicsOpts = Object.assign({}, defaultOpts, {
       physics: { enabled: true, solver: 'barnesHut',
@@ -1300,7 +1300,6 @@ def _compute_positions(vis_nodes, vis_edges):
             company_positions[cid] = (x, y)
             node_by_id[cid]["x"] = x
             node_by_id[cid]["y"] = y
-            node_by_id[cid]["fixed"] = {"x": True, "y": True}
 
     # Layout satellite nodes (Directors, Persons, etc.) around their company
     company_satellites = {}  # company_id -> [node_id]
