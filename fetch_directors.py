@@ -256,6 +256,8 @@ def main():
                         help="Also fetch directors for all companies in the ownership tree")
     parser.add_argument("--active-only", action="store_true",
                         help="Only load currently active officers (no resigned_on date)")
+    parser.add_argument("--force", action="store_true",
+                        help="Skip freshness check, fetch all companies")
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
@@ -264,14 +266,19 @@ def main():
     if not args.api_key:
         sys.exit("Error: No API key. Set CH_API_KEY env var or use --api-key")
 
-    print(f"Connecting to Neo4j at {args.uri}...")
-    driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
+    print(f"Connecting to Neo4j at {args.uri}...", flush=True)
+    driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password),
+                                  connection_timeout=10, max_transaction_retry_time=30)
     driver.verify_connectivity()
+    print("  Connected.", flush=True)
 
     # Create indexes
+    print("  Creating indexes...", flush=True)
     with driver.session() as session:
         for q in CREATE_INDEXES_QUERY:
+            print(f"    {q[:60]}...", flush=True)
             session.run(q)
+    print("  Indexes ready.", flush=True)
 
     # Get list of companies to fetch
     if args.follow_tree:
@@ -286,15 +293,18 @@ def main():
     skipped = 0
     unchanged = 0
 
-    # Get freshness metadata for all companies at once
-    print("  Checking data freshness...", flush=True)
-    meta = get_fetch_metadata(driver, companies)
-    stale_count = sum(1 for cn in companies if needs_refresh(meta.get(cn, {}).get("fetchedAt")))
-    print(f"  {stale_count} need fetching, {len(companies) - stale_count} are fresh", flush=True)
+    if args.force:
+        print("  --force: skipping freshness check", flush=True)
+        meta = {}
+    else:
+        print("  Checking data freshness...", flush=True)
+        meta = get_fetch_metadata(driver, companies)
+        stale_count = sum(1 for cn in companies if needs_refresh(meta.get(cn, {}).get("fetchedAt")))
+        print(f"  {stale_count} need fetching, {len(companies) - stale_count} are fresh", flush=True)
 
     for i, cn in enumerate(companies, 1):
         m = meta.get(cn, {"fetchedAt": None, "etag": None})
-        stale = needs_refresh(m["fetchedAt"])
+        stale = args.force or needs_refresh(m["fetchedAt"])
 
         if not stale:
             skipped += 1
