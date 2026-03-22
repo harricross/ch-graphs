@@ -828,7 +828,7 @@ def main():
     group.add_argument("--person", help="Person name search (full-text)")
     group.add_argument("--cypher", help="Custom Cypher query")
 
-    parser.add_argument("--depth", type=int, default=20, help="Max ownership tree depth (default: 20)")
+    parser.add_argument("--depth", type=int, default=30, help="Max ownership tree depth (default: 30)")
     parser.add_argument("--limit", type=int, default=50, help="Max results for name/person search")
     parser.add_argument("--format", nargs="+", default=["html", "json"], choices=["csv", "json", "html"],
                         help="Output formats (default: html json)")
