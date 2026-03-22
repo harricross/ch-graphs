@@ -9,4 +9,4 @@ COPY web.py search.py fetch_directors.py ./
 
 EXPOSE 5000
 
-CMD ["python", "web.py"]
+CMD ["gunicorn", "--worker-class", "gevent", "--workers", "2", "--bind", "0.0.0.0:5000", "--timeout", "300", "web:app"]
