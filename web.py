@@ -276,11 +276,11 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     <div class="btn-row">
       <button class="btn" onclick="toggleLayout()">Toggle Layout</button>
       <button class="btn" onclick="network.fit()">Fit View</button>
-      <button class="btn" onclick="togglePhysics()">Toggle Physics</button>
       <button class="btn" id="autoBtn" onclick="autoResolve()">Auto-resolve all</button>
       <label style="font-size:11px; color:#888; margin-left:4px;">Max: <input type="number" id="autoMax" value="200" min="10" max="5000" style="width:55px; background:#1a1a2e; color:#eee; border:1px solid #4a4a7a; border-radius:3px; padding:2px 4px; font-size:11px;"></label>
       <div id="autoStatus" style="font-size:11px; color:#888; margin-top:4px;"></div>
       <button class="btn" onclick="toggleFormer()">Show Former Officers</button>
+      <button class="btn" onclick="toggleDormant()">Hide Dormant</button>
     </div>
   </div>
   <div id="details"></div>
@@ -290,7 +290,7 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
     var edges = new vis.DataSet();
     var container = document.getElementById('graph');
     var data = { nodes: nodes, edges: edges };
-    var hierarchical = true, physicsOn = true;
+    var hierarchical = true;
 
     var hierOpts = {
       layout: { hierarchical: { enabled: true, direction: 'UD', sortMethod: 'directed',
@@ -312,8 +312,22 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       interaction: hierOpts.interaction };
 
     var network = new vis.Network(container, data, hierOpts);
+    // Auto-disable physics after stabilization so nodes stay in place
+    network.on('stabilizationIterationsDone', function() { network.setOptions({ physics: { enabled: false } }); });
     function toggleLayout() { hierarchical = !hierarchical; network.setOptions(hierarchical ? hierOpts : forceOpts); }
-    function togglePhysics() { physicsOn = !physicsOn; network.setOptions({ physics: { enabled: physicsOn } }); }
+    function toggleDormant() {
+      // Toggle visibility of dormant companies
+      var allN = nodes.get();
+      var hiding = !allN.some(function(n) { return n.hidden; });
+      allN.forEach(function(n) {
+        if (n.group === 'Company') {
+          var status = ((n.properties || {}).status || '').toLowerCase();
+          if (status.indexOf('dormant') >= 0 || status.indexOf('dissolved') >= 0) {
+            nodes.update({ id: n.id, hidden: hiding });
+          }
+        }
+      });
+    }
     function toggleFormer() {
       var url = new URL(window.location);
       if (url.searchParams.get('former') === '1') {
