@@ -275,6 +275,8 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       <button class="btn" onclick="toggleLayout()">Toggle Layout</button>
       <button class="btn" onclick="network.fit()">Fit View</button>
       <button class="btn" onclick="togglePhysics()">Toggle Physics</button>
+      <button class="btn" id="autoBtn" onclick="autoResolve()">Auto-resolve all</button>
+      <div id="autoStatus" style="font-size:11px; color:#888; margin-top:4px;"></div>
       <button class="btn" onclick="toggleFormer()">Show Former Officers</button>
     </div>
   </div>
@@ -479,6 +481,76 @@ GRAPH_PAGE_TEMPLATE = """<!DOCTYPE html>
       evtSource.close();
     });
     evtSource.onerror = function() { evtSource.close(); };
+
+    // Auto-resolve: keep expanding all unexpanded Company/CorporateEntity nodes
+    var autoRunning = false;
+    var expanded = {};
+    function autoResolve() {
+      if (autoRunning) { autoRunning = false; document.getElementById('autoBtn').textContent = 'Auto-resolve all'; return; }
+      autoRunning = true;
+      document.getElementById('autoBtn').textContent = 'Stop auto-resolve';
+      autoStep();
+    }
+    function autoStep() {
+      if (!autoRunning) { document.getElementById('autoStatus').textContent = 'Stopped'; return; }
+      var allNodes = nodes.get();
+      var target = null;
+
+      // Phase 1: Find unexpanded Company or CorporateEntity nodes
+      for (var i = 0; i < allNodes.length; i++) {
+        var n = allNodes[i];
+        var cn = (n.properties || {}).companyNumber || '';
+        if (n.group === 'Company' && cn && !expanded['company:' + cn]) {
+          target = { type: 'company', id: cn, key: 'company:' + cn };
+          break;
+        }
+        if (n.group === 'CorporateEntity' && !expanded['corporate:' + n.id]) {
+          var regNum = (n.properties || {}).registrationNumber || '';
+          if (regNum) {
+            var padded = /^\d+$/.test(regNum) ? ('00000000' + regNum).slice(-8) : regNum;
+            if (!expanded['company:' + padded]) {
+              target = { type: 'company', id: padded, key: 'company:' + padded };
+              break;
+            }
+          }
+          expanded['corporate:' + n.id] = true;
+        }
+      }
+
+      // Phase 2: If all ownership trees expanded, fetch directors for companies missing them
+      if (!target) {
+        for (var j = 0; j < allNodes.length; j++) {
+          var nd = allNodes[j];
+          var cnum = (nd.properties || {}).companyNumber || '';
+          if (nd.group === 'Company' && cnum && !expanded['directors:' + cnum]) {
+            target = { type: 'directors', id: cnum, key: 'directors:' + cnum };
+            break;
+          }
+        }
+      }
+
+      if (!target) {
+        autoRunning = false;
+        document.getElementById('autoBtn').textContent = 'Auto-resolve all';
+        document.getElementById('autoStatus').textContent = 'Done — all nodes resolved (' + allNodes.length + ' nodes, ' + edges.length + ' edges)';
+        network.fit({ animation: true });
+        return;
+      }
+      expanded[target.key] = true;
+      var count = Object.keys(expanded).length;
+      var label = target.type === 'directors' ? 'directors for ' + target.id : target.id;
+      document.getElementById('autoStatus').textContent = 'Resolving ' + label + ' (' + count + ' expanded, ' + allNodes.length + ' nodes)...';
+      fetch('/api/expand?type=' + encodeURIComponent(target.type) + '&id=' + encodeURIComponent(target.id))
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.nodes && d.nodes.length > 0) mergeData(d);
+          setTimeout(autoStep, 200);
+        })
+        .catch(function(e) {
+          document.getElementById('autoStatus').textContent = 'Error on ' + label + ': ' + e;
+          setTimeout(autoStep, 500);
+        });
+    }
   </script>
 </body>
 </html>"""
