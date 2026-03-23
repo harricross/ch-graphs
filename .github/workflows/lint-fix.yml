@@ -13,6 +13,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    env:
+      FIX_BRANCH: lint/auto-fix
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,19 +31,40 @@ jobs:
           ruff check --fix .
           ruff format .
 
-      - name: Open or update fix PR
-        uses: peter-evans/create-pull-request@v7
-        with:
-          commit-message: "fix: apply ruff auto-fixes"
-          branch: lint/auto-fix
-          title: "fix: apply ruff auto-fixes"
-          body: |
-            Automated lint fixes applied by the **Lint Auto-fix** workflow.
+      - name: Commit and push fixes
+        id: push
+        run: |
+          if git diff --quiet; then
+            echo "No lint fixes needed."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$FIX_BRANCH"
+          git add -A
+          git commit -m "fix: apply ruff auto-fixes"
+          git push --force origin "$FIX_BRANCH"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
-            Changes were produced by:
-            ```
-            ruff check --fix .
-            ruff format .
-            ```
-          labels: lint
-          delete-branch: true
+      - name: Open or update PR via GH CLI
+        if: steps.push.outputs.changed == 'true'
+        run: |
+          PR_BODY="Automated lint fixes applied by the **Lint Auto-fix** workflow.
+
+          Changes were produced by:
+          \`\`\`
+          ruff check --fix .
+          ruff format .
+          \`\`\`"
+
+          if gh pr view "$FIX_BRANCH" --json number -q .number > /dev/null 2>&1; then
+            echo "PR already exists — new commit pushed to $FIX_BRANCH."
+          else
+            gh pr create \
+              --head "$FIX_BRANCH" \
+              --base main \
+              --title "fix: apply ruff auto-fixes" \
+              --body "$PR_BODY" \
+              --label lint
+          fi
