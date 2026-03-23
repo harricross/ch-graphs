@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Companies House Graph Export</title>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, sans-serif; background: #1a1a2e; color: #eee; }
+    #graph { width: 100vw; height: 100vh; }
+    #controls { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.8);
+             padding: 14px 18px; border-radius: 10px; font-size: 13px; z-index: 10; max-width: 320px; }
+    #controls h3 { margin: 0 0 8px 0; font-size: 16px; }
+    .legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+    .legend-shape { width: 14px; height: 14px; display: inline-block; }
+    .legend-line { width: 20px; height: 3px; display: inline-block; border-radius: 1px; }
+    .btn { background: #2a2a4a; border: 1px solid #4a4a7a; color: #ccc; padding: 6px 12px;
+            border-radius: 5px; cursor: pointer; font-size: 12px; margin: 2px; }
+    .btn:hover { background: #3a3a6a; color: #fff; }
+    .btn-row { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+    #details { position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.85);
+             padding: 14px 18px; border-radius: 10px; font-size: 12px; z-index: 10;
+             max-width: 400px; max-height: 50vh; overflow-y: auto; display: none; }
+    #details h4 { margin: 0 0 6px 0; }
+    #details table { border-collapse: collapse; width: 100%; }
+    #details td { padding: 2px 6px; border-bottom: 1px solid #333; vertical-align: top; word-break: break-all; }
+    #details td:first-child { color: #aaa; white-space: nowrap; }
+    .expand-btn { background: #4C8BF5; border: none; color: #fff; padding: 6px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; margin-bottom: 8px; display: block; }
+    .expand-btn:hover { background: #3a7be0; }
+    .spinner-sm { width: 20px; height: 20px; border: 3px solid #333; border-top: 3px solid #4C8BF5; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 8px 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <h3>Companies House Ownership Tree</h3>
+    <div>${NODE_COUNT} nodes, ${EDGE_COUNT} relationships</div>
+    <div class="legend">
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="#4C8BF5"/></svg>Company</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="#34A853"/></svg>Person</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" fill="#FBBC04"/></svg>Corporate Entity</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,1 13,13 1,13" fill="#EA4335"/></svg>Legal Person</span>
+      <span class="legend-item"><svg class="legend-shape" viewBox="0 0 14 14"><polygon points="7,13 1,1 13,1" fill="#00BCD4"/></svg>Director</span>
+    </div>
+    <div style="margin-top: 8px; font-size: 11px; color: #aaa;">Arrow colours:</div>
+    <div class="legend" style="margin-top: 2px;">
+      <span class="legend-item"><span class="legend-line" style="background:#e74c3c"></span>75-100%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#e67e22"></span>50-75%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#f1c40f"></span>25-50%</span>
+      <span class="legend-item"><span class="legend-line" style="background:#9b59b6"></span>Appoint directors</span>
+      <span class="legend-item"><span class="legend-line" style="background:#3498db"></span>Significant influence</span>
+      <span class="legend-item"><span class="legend-line" style="background:#00BCD4"></span>Officer/Director</span>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="toggleLayout()">Toggle Layout</button>
+      <button class="btn" onclick="network.fit()">Fit View</button>
+      <button class="btn" onclick="togglePhysics()">Toggle Physics</button>
+    </div>
+  </div>
+  <div id="details"></div>
+  <div id="graph"></div>
+  <script>
+    var nodes = new vis.DataSet(${VIS_NODES_JSON});
+    var edges = new vis.DataSet(${VIS_EDGES_JSON});
+    var container = document.getElementById('graph');
+    var data = { nodes: nodes, edges: edges };
+    var hierarchical = true;
+    var physicsOn = true;
+
+    var hierarchicalOptions = {
+      layout: {
+        hierarchical: {
+          enabled: true,
+          direction: 'UD',
+          sortMethod: 'directed',
+          levelSeparation: 150,
+          nodeSpacing: 250,
+          treeSpacing: 250,
+          blockShifting: true,
+          edgeMinimization: true,
+          parentCentralization: true
+        }
+      },
+      physics: {
+        enabled: true,
+        hierarchicalRepulsion: {
+          centralGravity: 0.0,
+          springLength: 150,
+          springConstant: 0.01,
+          nodeDistance: 200,
+          damping: 0.09
+        },
+        stabilization: { iterations: 300 }
+      },
+      nodes: {
+        font: { color: '#eee', size: 10, multi: 'md', face: 'arial' },
+        borderWidth: 2,
+        widthConstraint: { maximum: 150 }
+      },
+      edges: {
+        color: { color: '#666', highlight: '#fff', hover: '#aaa' },
+        font: { color: '#999', size: 8, strokeWidth: 0, background: 'rgba(0,0,0,0.5)' },
+        smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 },
+        width: 1.5
+      },
+      interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true }
+    };
+
+    var forceOptions = {
+      layout: { hierarchical: { enabled: false } },
+      physics: {
+        solver: 'forceAtlas2Based',
+        forceAtlas2Based: { gravitationalConstant: -100, springLength: 180 },
+        stabilization: { iterations: 300 }
+      },
+      nodes: hierarchicalOptions.nodes,
+      edges: {
+        color: hierarchicalOptions.edges.color,
+        font: hierarchicalOptions.edges.font,
+        smooth: { type: 'continuous' },
+        width: 1.5
+      },
+      interaction: hierarchicalOptions.interaction
+    };
+
+    var network = new vis.Network(container, data, hierarchical ? hierarchicalOptions : forceOptions);
+
+    function toggleLayout() {
+      hierarchical = !hierarchical;
+      network.setOptions(hierarchical ? hierarchicalOptions : forceOptions);
+    }
+    function togglePhysics() {
+      physicsOn = !physicsOn;
+      network.setOptions({ physics: { enabled: physicsOn } });
+    }
+
+    // Click node to show details — use stored properties object
+    network.on('click', function(params) {
+      var panel = document.getElementById('details');
+      if (params.nodes.length > 0) {
+        var nodeId = params.nodes[0];
+        var node = nodes.get(nodeId);
+        var props = node.properties || {};
+        var cn = props.companyNumber || '';
+        var h = '<h4>' + escHtml(node.group || '') + '</h4>';
+        if (cn && node.group === 'Company') {
+          h += '<button class="expand-btn" onclick="expandCompany(\'' + escHtml(cn) + '\')">Expand ownership tree</button>';
+        }
+        h += '<table>';
+        Object.keys(props).forEach(function(key) {
+          h += '<tr><td>' + escHtml(key) + '</td><td>' + escHtml(props[key]) + '</td></tr>';
+        });
+        h += '</table>';
+        panel.innerHTML = h;
+        panel.style.display = 'block';
+      } else {
+        panel.style.display = 'none';
+      }
+    });
+
+    // Double-click a Company node to expand it inline
+    network.on('doubleClick', function(params) {
+      if (params.nodes.length > 0) {
+        var nodeId = params.nodes[0];
+        var node = nodes.get(nodeId);
+        var cn = (node.properties || {}).companyNumber;
+        if (cn && node.group === 'Company') {
+          expandCompany(cn);
+        }
+      }
+    });
+
+    var expanding = {};
+    function expandCompany(cn) {
+      if (expanding[cn]) return;
+      expanding[cn] = true;
+      var panel = document.getElementById('details');
+      panel.innerHTML = '<h4>Loading ' + escHtml(cn) + '...</h4><div class="spinner-sm"></div>';
+      panel.style.display = 'block';
+
+      fetch('/api/expand?company=' + encodeURIComponent(cn))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.error) {
+            panel.innerHTML = '<h4>Error</h4><p>' + escHtml(data.error) + '</p>';
+            expanding[cn] = false;
+            return;
+          }
+          var added = 0;
+          (data.nodes || []).forEach(function(n) {
+            if (!nodes.get(n.id)) {
+              nodes.add(n);
+              added++;
+            }
+          });
+          (data.edges || []).forEach(function(e) {
+            // Check for duplicate edges
+            var existing = edges.get();
+            var isDup = existing.some(function(ex) {
+              return ex.from === e.from && ex.to === e.to && ex.label === e.label;
+            });
+            if (!isDup) {
+              edges.add(e);
+              added++;
+            }
+          });
+          panel.innerHTML = '<h4>Expanded ' + escHtml(cn) + '</h4><p>Added ' + added + ' items</p>';
+          expanding[cn] = false;
+          network.fit({ animation: true });
+        })
+        .catch(function(err) {
+          panel.innerHTML = '<h4>Error</h4><p>' + escHtml(err.toString()) + '</p>';
+          expanding[cn] = false;
+        });
+    }
+
+    function escHtml(s) {
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>CH Graphs — UK Company Ownership Search</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f0f1a; color: #eee; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    h1 { font-size: 2em; margin-bottom: 8px; }
+    .subtitle { color: #888; margin-bottom: 32px; }
+    .search-box { display: flex; gap: 8px; margin-bottom: 24px; }
+    input[type=text] { padding: 12px 16px; font-size: 16px; border: 1px solid #333; border-radius: 8px; background: #1a1a2e; color: #eee; width: 350px; outline: none; }
+    input[type=text]:focus { border-color: #4C8BF5; }
+    button { padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; background: #4C8BF5; color: #fff; cursor: pointer; }
+    button:hover { background: #3a7be0; }
+    .or { color: #666; margin: 16px 0; }
+    .name-search { display: flex; gap: 8px; }
+    .results { margin-top: 24px; width: 600px; }
+    .result-item { padding: 12px 16px; border: 1px solid #333; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e; cursor: pointer; transition: border-color 0.2s; }
+    .result-item:hover { border-color: #4C8BF5; }
+    .result-item .name { font-weight: bold; }
+    .result-item .meta { color: #888; font-size: 13px; margin-top: 4px; }
+    a { color: #4C8BF5; text-decoration: none; }
+    .recent { margin-top: 40px; width: 600px; }
+    .recent h3 { color: #888; font-size: 14px; margin-bottom: 8px; }
+    .status { color: #f1c40f; margin-top: 12px; font-size: 14px; }
+    .error { color: #e74c3c; }
+  </style>
+</head>
+<body>
+  <h1>CH Graphs</h1>
+  <p class="subtitle">UK Company Ownership Explorer</p>
+
+  <form class="search-box" action="/graph" method="get">
+    <input type="text" name="company" placeholder="Company number (e.g. 00253240)" pattern="[A-Za-z0-9]+" required>
+    <button type="submit">View Graph</button>
+  </form>
+
+  <p class="or">— or search by name —</p>
+
+  <form class="name-search" action="/search" method="get">
+    <input type="text" name="q" placeholder="Company name (e.g. Tesco)" required>
+    <button type="submit">Search</button>
+  </form>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <div style="margin-top: 32px; color: #555; font-size: 12px;">
+    Graphs served: {{ stats.graphs_served }} · CH API calls: {{ stats.ch_api_calls }} · Served from cache: {{ stats.ch_api_cached }}
+  </div>
+
+  {% if recent %}
+  <div class="recent">
+    <h3>Recent exports</h3>
+    {% for f in recent %}
+    <div class="result-item" onclick="window.location='/exports/{{ f }}'">
+      <span class="name">{{ f }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</body>
+</html>
