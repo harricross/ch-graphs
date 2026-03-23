@@ -453,6 +453,7 @@ docker run --rm \\
     --relationships=IS_COMPANY=/import/rel_is_company.csv \\
     --skip-bad-relationships \\
     --skip-duplicate-nodes \\
+    --bad-tolerance=10000000 \\
     --array-delimiter=";" \\
     --trim-strings=true \\
     neo4j
