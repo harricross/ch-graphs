@@ -1,0 +1,46 @@
+name: Lint Auto-fix
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  ruff-fix:
+    name: ruff fix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff auto-fix
+        run: |
+          ruff check --fix .
+          ruff format .
+
+      - name: Open or update fix PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "fix: apply ruff auto-fixes"
+          branch: lint/auto-fix
+          title: "fix: apply ruff auto-fixes"
+          body: |
+            Automated lint fixes applied by the **Lint Auto-fix** workflow.
+
+            Changes were produced by:
+            ```
+            ruff check --fix .
+            ruff format .
+            ```
+          labels: lint
+          delete-branch: true
