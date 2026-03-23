@@ -10,7 +10,7 @@ import os
 import sys
 import time
 
-from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, jsonify, redirect, render_template_string, request, send_from_directory, url_for
 from neo4j import GraphDatabase
 
 # Load .env
@@ -25,8 +25,15 @@ if os.path.exists(_env_path):
 
 # Import director fetching from fetch_directors.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fetch_directors import fetch_officers, load_officers_to_neo4j, get_tree_company_numbers, get_fetch_metadata, needs_refresh, STAMP_FETCH_QUERY
-from search import extract_graph_data, _compute_levels
+from fetch_directors import (  # noqa: E402
+    STAMP_FETCH_QUERY,
+    fetch_officers,
+    get_fetch_metadata,
+    get_tree_company_numbers,
+    load_officers_to_neo4j,
+    needs_refresh,
+)
+from search import _compute_levels, extract_graph_data  # noqa: E402
 
 app = Flask(__name__)
 
@@ -1347,22 +1354,30 @@ def _build_vis_data(nodes, rels):
     def edge_color(rel_type, props):
         if rel_type == "OFFICER_OF":
             role = (props.get("role", "") or "").lower()
-            if "secretary" in role: return "#78909C", 1.5  # grey-blue for secretaries
+            if "secretary" in role:
+                return "#78909C", 1.5  # grey-blue for secretaries
             return "#00BCD4", 2.0  # cyan for directors
         noc_list = props.get("naturesOfControl", [])
-        if not noc_list: return "#666", 1.5
+        if not noc_list:
+            return "#666", 1.5
         noc_str = " ".join(noc_list) if isinstance(noc_list, list) else str(noc_list)
-        if "75-to-100" in noc_str: return "#e74c3c", 3.5
-        elif "50-to-75" in noc_str: return "#e67e22", 2.5
-        elif "25-to-50" in noc_str: return "#f1c40f", 2.0
-        elif "right-to-appoint" in noc_str: return "#9b59b6", 2.0
-        elif "significant-influence" in noc_str: return "#3498db", 2.0
+        if "75-to-100" in noc_str:
+            return "#e74c3c", 3.5
+        elif "50-to-75" in noc_str:
+            return "#e67e22", 2.5
+        elif "25-to-50" in noc_str:
+            return "#f1c40f", 2.0
+        elif "right-to-appoint" in noc_str:
+            return "#9b59b6", 2.0
+        elif "significant-influence" in noc_str:
+            return "#3498db", 2.0
         return "#95a5a6", 1.5
 
     vis_edges = []
     for r in merged_rels:
         ek = (r["startId"], r["endId"], r["type"])
-        if ek in seen_edges: continue
+        if ek in seen_edges:
+            continue
         seen_edges.add(ek)
         props = r["properties"]
         col, width = edge_color(r["type"], props)
@@ -1698,21 +1713,19 @@ def api_expand():
         company = expand_id.upper()
         if CH_API_KEY:
             # Direct fetch for this specific company (not tree-based)
-            from fetch_directors import fetch_officers as _fetch, load_officers_to_neo4j as _load, get_fetch_metadata as _meta, needs_refresh as _needs
-            meta = _meta(d, [company])
+            meta = get_fetch_metadata(d, [company])
             m = meta.get(company, {"fetchedAt": None, "etag": None})
-            if _needs(m["fetchedAt"]):
+            if needs_refresh(m["fetchedAt"]):
                 stats["ch_api_calls"] += 1
                 print(f"  [directors] Fetching officers for {company}...", flush=True)
-                officers, new_etag, modified = _fetch(CH_API_KEY, company, etag=m.get("etag"))
+                officers, new_etag, modified = fetch_officers(CH_API_KEY, company, etag=m.get("etag"))
                 if modified and officers:
-                    _load(d, company, officers, etag=new_etag)
+                    load_officers_to_neo4j(d, company, officers, etag=new_etag)
                     print(f"  [directors] Loaded {len(officers)} officers for {company}", flush=True)
                 elif not modified:
                     stats["ch_api_cached"] += 1
-                    from fetch_directors import STAMP_FETCH_QUERY as _stamp
                     with d.session() as session:
-                        session.run(_stamp, cn=company, etag=m.get("etag") or "")
+                        session.run(STAMP_FETCH_QUERY, cn=company, etag=m.get("etag") or "")
             else:
                 stats["ch_api_cached"] += 1
         with d.session() as session:

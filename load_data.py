@@ -17,16 +17,16 @@ Usage:
 """
 
 import csv
-import json
-import os
-import sys
-import time
-from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 import glob
+import json
+import os
+import sys
+import time
+
 
 def _find_file(pattern, label):
     matches = sorted(glob.glob(pattern))
@@ -159,9 +159,6 @@ def process_companies(company_csv, out_dir):
                 pname = row.get(f"PreviousName_{i}.CompanyName", "").strip()
                 if pname:
                     prev_names.append(pname)
-
-            mort_charges = row.get("Mortgages.NumMortCharges", "")
-            mort_outstanding = row.get("Mortgages.NumMortOutstanding", "")
 
             company_w.writerow([
                 cn,

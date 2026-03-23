@@ -78,7 +78,7 @@ def fetch_officers(api_key, company_number, etag=None):
             )
             print(f" -> {resp.status_code} ({len(resp.content)} bytes)", end="", flush=True)
         except requests.Timeout:
-            print(f" -> TIMEOUT", end="", flush=True)
+            print(" -> TIMEOUT", end="", flush=True)
             return officers, response_etag, True
         except requests.RequestException as e:
             print(f" -> ERROR: {e}", end="", flush=True)
@@ -94,7 +94,7 @@ def fetch_officers(api_key, company_number, etag=None):
         if resp.status_code == 404:
             return [], None, True
         elif resp.status_code == 429:
-            print(f"rate limited...", end="")
+            print("rate limited...", end="")
             time.sleep(60)
             continue
         elif resp.status_code != 200:
