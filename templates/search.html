@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Search: {{ q }}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; background: #0f0f1a; color: #eee; padding: 40px; }
+    h2 { margin-bottom: 16px; }
+    a { color: #4C8BF5; text-decoration: none; }
+    .back { margin-bottom: 24px; display: inline-block; }
+    .result-item { padding: 12px 16px; border: 1px solid #333; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e; max-width: 700px; }
+    .result-item:hover { border-color: #4C8BF5; }
+    .name { font-weight: bold; }
+    .name a { color: #eee; }
+    .name a:hover { color: #4C8BF5; }
+    .meta { color: #888; font-size: 13px; margin-top: 4px; }
+    .none { color: #666; }
+  </style>
+</head>
+<body>
+  <a class="back" href="/">← Back</a>
+  <h2>Results for "{{ q }}"</h2>
+  {% if results %}
+    {% for r in results %}
+    <div class="result-item">
+      <div class="name"><a href="/graph?company={{ r.number }}">{{ r.name }}</a></div>
+      <div class="meta">{{ r.number }} · {{ r.status }} · {{ r.category }}</div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="none">No results found.</p>
+  {% endif %}
+</body>
+</html>
