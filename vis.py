@@ -33,6 +33,7 @@ def _build_vis_data(nodes, rels):
                 if "CorporateEntity" in nodes[ce_id]["labels"] and "Company" in nodes[co_id]["labels"]:
                     ce_to_company[ce_id] = co_id
     merged_nodes = {nid: n for nid, n in nodes.items() if nid not in ce_to_company}
+
     def remap(nid):
         return ce_to_company.get(nid, nid)
     merged_rels = []
@@ -220,22 +221,30 @@ def _build_vis_data(nodes, rels):
     def edge_color(rel_type, props):
         if rel_type == "OFFICER_OF":
             role = (props.get("role", "") or "").lower()
-            if "secretary" in role: return "#78909C", 1.5  # grey-blue for secretaries
+            if "secretary" in role:
+                return "#78909C", 1.5  # grey-blue for secretaries
             return "#00BCD4", 2.0  # cyan for directors
         noc_list = props.get("naturesOfControl", [])
-        if not noc_list: return "#666", 1.5
+        if not noc_list:
+            return "#666", 1.5
         noc_str = " ".join(noc_list) if isinstance(noc_list, list) else str(noc_list)
-        if "75-to-100" in noc_str: return "#e74c3c", 3.5
-        elif "50-to-75" in noc_str: return "#e67e22", 2.5
-        elif "25-to-50" in noc_str: return "#f1c40f", 2.0
-        elif "right-to-appoint" in noc_str: return "#9b59b6", 2.0
-        elif "significant-influence" in noc_str: return "#3498db", 2.0
+        if "75-to-100" in noc_str:
+            return "#e74c3c", 3.5
+        elif "50-to-75" in noc_str:
+            return "#e67e22", 2.5
+        elif "25-to-50" in noc_str:
+            return "#f1c40f", 2.0
+        elif "right-to-appoint" in noc_str:
+            return "#9b59b6", 2.0
+        elif "significant-influence" in noc_str:
+            return "#3498db", 2.0
         return "#95a5a6", 1.5
 
     vis_edges = []
     for r in merged_rels:
         ek = (r["startId"], r["endId"], r["type"])
-        if ek in seen_edges: continue
+        if ek in seen_edges:
+            continue
         seen_edges.add(ek)
         props = r["properties"]
         col, width = edge_color(r["type"], props)
@@ -386,4 +395,3 @@ def _compute_positions(vis_nodes, vis_edges):
         for i, oid in enumerate(orphans):
             node_by_id[oid]["x"] = -tw / 2 + i * 150
             node_by_id[oid]["y"] = oy
-

@@ -25,9 +25,9 @@ if os.path.exists(_env_path):
 
 # Import director fetching from fetch_directors.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fetch_directors import fetch_officers, load_officers_to_neo4j, get_tree_company_numbers, get_fetch_metadata, needs_refresh, STAMP_FETCH_QUERY
-from search import extract_graph_data
-from vis import _build_vis_data, _compute_positions
+from fetch_directors import fetch_officers, load_officers_to_neo4j, get_tree_company_numbers, get_fetch_metadata, needs_refresh, STAMP_FETCH_QUERY  # noqa: E402
+from search import extract_graph_data  # noqa: E402
+from vis import _build_vis_data  # noqa: E402
 
 app = Flask(__name__)
 
@@ -150,7 +150,7 @@ def api_stream():
                 print(f"  [{company}] {data}", flush=True)
             else:
                 d = _json.loads(data)
-                print(f"  [{company}] +{len(d.get('nodes',[]))} nodes, +{len(d.get('edges',[]))} edges", flush=True)
+                print(f"  [{company}] +{len(d.get('nodes', []))} nodes, +{len(d.get('edges', []))} edges", flush=True)
             # SSE data fields can't contain bare newlines — split into multiple data: lines
             lines = data.replace('\n', '\ndata: ')
             return f"event: {event}\ndata: {lines}\n\n"

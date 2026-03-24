@@ -31,7 +31,6 @@ import argparse
 import csv
 import json
 import os
-import sys
 import time
 from pathlib import Path
 from string import Template
@@ -714,7 +713,7 @@ def main():
     if args.company and args.api_key and not args.no_directors:
         ensure_directors_for_tree(driver, args.api_key, args.company)
 
-    print(f"Running query...")
+    print("Running query...")
     with driver.session() as session:
         result = session.run(query, **params)
         records = list(result)
@@ -745,7 +744,7 @@ def main():
         path = f"exports/{args.output}.{ext}"
         EXPORTERS[fmt](nodes, rels, flat_rows, path)
 
-    print(f"\nDone! Files in exports/")
+    print("\nDone! Files in exports/")
 
 
 if __name__ == "__main__":
